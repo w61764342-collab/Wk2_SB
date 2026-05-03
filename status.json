@@ -1,0 +1,17 @@
+{
+  "date": "2026-05-02 08:42:06 UTC",
+  "timestamp": "2026-05-02T08:42:06Z",
+  "overall_status": "success",
+  "workflows": {
+    "properties": {
+      "status": "success",
+      "workflow": "scraper.yml"
+    },
+    "offices": {
+      "status": "success",
+      "workflow": "scraper.yml"
+    }
+  },
+  "pipeline_run_id": "25247466674",
+  "pipeline_run_number": "49"
+}
