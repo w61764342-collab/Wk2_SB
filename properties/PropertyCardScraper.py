@@ -249,11 +249,11 @@ class PropertyCardScraper:
     async def fetch_from_api(self, post_id):
         """
         Fetch property data from the API endpoint.
-        API URL: https://api-v2.boshamlan.com/api/listings/{post_id}
+        API URL: https://api.boshamlan.com/api/listings/{post_id}
         Returns: dict with keys like slug, title_ar, description_ar, price, views, contact, images
         """
         try:
-            api_url = f"https://api-v2.boshamlan.com/api/listings/{post_id}"
+            api_url = f"https://api.boshamlan.com/api/listings/{post_id}"
             
             # Get random headers for the request
             headers = get_random_headers()
