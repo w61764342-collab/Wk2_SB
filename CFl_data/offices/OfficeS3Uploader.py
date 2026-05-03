@@ -238,10 +238,10 @@ def main():
     uploader = OfficeS3Uploader()
     
     # Verify bucket exists
-        if uploader.verify_bucket_exists():
-            print(f"Bucket '{uploader.bucket_name}' exists and is accessible")
-        else:
-            print(f"Warning: Bucket '{uploader.bucket_name}' does not exist or is not accessible")
+    if uploader.verify_bucket_exists():
+        print(f"Bucket '{uploader.bucket_name}' exists and is accessible")
+    else:
+        print(f"Warning: Bucket '{uploader.bucket_name}' does not exist or is not accessible")
 
 
 if __name__ == "__main__":

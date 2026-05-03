@@ -7,6 +7,8 @@ import pandas as pd
 
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Insert CFl_data directory first so 'offices.*' resolves to R2 versions
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from offices.OfficeScraper import OfficeScraper
 from offices.OfficeS3Uploader import OfficeS3Uploader
