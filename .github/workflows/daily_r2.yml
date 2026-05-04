@@ -193,6 +193,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add status_r2.json
           git commit -m "Update status_r2.json - ${{ steps.status.outputs.overall_status }} ($(date -u +"%Y-%m-%d %H:%M UTC"))" || echo "No changes to commit"
+          git pull --rebase origin main
           git push
 
       - name: Upload status as artifact
