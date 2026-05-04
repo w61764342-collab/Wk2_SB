@@ -168,14 +168,14 @@ class CategoryScraper:
             with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
                 for subcat_name, data in category_data.items():
                     if data:  # Only create sheet if there's data
-                        # Add image_s3_path column if we have image mappings
+                        # Add image_r2_path column if we have image mappings
                         if image_s3_mapping:
                             for item in data:
                                 image_url = item.get('image_url')
                                 if image_url and image_url in image_s3_mapping:
-                                    item['image_s3_path'] = image_s3_mapping[image_url]
+                                    item['image_r2_path'] = image_s3_mapping[image_url]
                                 else:
-                                    item['image_s3_path'] = None
+                                    item['image_r2_path'] = None
                         
                         df = pd.json_normalize(data)
                         # Excel sheet names have a 31 character limit
@@ -185,7 +185,7 @@ class CategoryScraper:
                     else:
                         # Create an empty sheet with headers
                         df = pd.DataFrame(columns=['title', 'price', 'relative_date', 'description', 
-                                                  'image_url', 'link', 'mobile_number', 'views_number', 'image_s3_path'])
+                                                  'image_url', 'link', 'mobile_number', 'views_number', 'image_r2_path'])
                         sheet_name = subcat_name[:31]
                         df.to_excel(writer, sheet_name=sheet_name, index=False)
                         print(f"Added empty sheet '{sheet_name}'")

@@ -48,7 +48,7 @@ class MainS3Scraper:
         Main execution method:
         1. Scrapes all categories and subcategories
         2. Uploads images to S3 in 'images' folder
-        3. Creates Excel files with image_s3_path column
+        3. Creates Excel files with image_r2_path column
         4. Uploads Excel files to S3 in 'excel files' folder
         """
         print("="*80)
@@ -100,7 +100,7 @@ class MainS3Scraper:
         
         print(f"\n\u2713 Successfully uploaded {total_images} image(s) to R2")
         
-        # Step 4: Create Excel files with image_s3_path column
+        # Step 4: Create Excel files with image_r2_path column
         print("\n[4/4] Creating and uploading Excel files...")
         excel_files = {}
         
