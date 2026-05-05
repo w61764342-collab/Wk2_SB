@@ -1,17 +1,17 @@
 {
-  "date": "2026-05-03 09:05:08 UTC",
-  "timestamp": "2026-05-03T09:05:08Z",
-  "overall_status": "failed",
+  "date": "2026-05-05 05:22:28 UTC",
+  "timestamp": "2026-05-05T05:22:28Z",
+  "overall_status": "success",
   "workflows": {
     "properties": {
-      "status": "cancelled",
+      "status": "success",
       "workflow": "scraper.yml"
     },
     "offices": {
-      "status": "",
+      "status": "success",
       "workflow": "scraper.yml"
     }
   },
-  "pipeline_run_id": "25274584375",
-  "pipeline_run_number": "1"
+  "pipeline_run_id": "25357563866",
+  "pipeline_run_number": "3"
 }
