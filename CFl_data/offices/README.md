@@ -1,6 +1,6 @@
 # Boshamlan Offices Data Scraper
 
-This folder contains scripts to scrape real estate office data from boshamlan.com/agents, generate Excel reports, and upload them to AWS S3.
+This folder contains scripts to scrape real estate office data from boshamlan.com/agents, generate Excel reports, and upload them to Cloudflare R2.
 
 ## Overview
 
@@ -9,11 +9,13 @@ The scraper collects:
 - **Office Listings**: Properties listed by each office (filtered by date)
 - **View Counts**: Number of views for each property listing
 
+The current version is designed to work with Cloudflare-protected Boshamlan pages and handles the site protection layer during scraping.
+
 ## Files
 
 - **OfficeScraper.py**: Main scraper that extracts office and listing data from JSON-LD
 - **OfficeExcelGenerator.py**: Generates Excel files with two sheets (info & main)
-- **OfficeS3Uploader.py**: Handles S3 upload with date partitioning
+- **OfficeS3Uploader.py**: Handles Cloudflare R2 upload with date partitioning
 - **main_offices_s3.py**: Orchestrates the complete pipeline
 - **config.example.py**: Configuration template
 
@@ -42,12 +44,12 @@ Each office gets one Excel file with two sheets:
 - Views (view count)
 - Date Published
 
-## S3 Storage Structure
+## R2 Storage Structure
 
-Files are uploaded to S3 with date partitioning:
+Files are uploaded to Cloudflare R2 with date partitioning:
 
 ```
-s3://data-collection-dl/
+r2://data-collection-dl/
 └── boshamlan-data/
     └── offices/
         └── year=2026/
@@ -80,18 +82,20 @@ pip install -r ../requirements.txt
 playwright install chromium
 ```
 
-### 3. Configure AWS Credentials
+### 3. Configure Cloudflare R2 Credentials
 
 Set environment variables:
 
 ```bash
 # Windows PowerShell
-$env:AWS_ACCESS_KEY_ID="your_access_key"
-$env:AWS_SECRET_ACCESS_KEY="your_secret_key"
-
-# Or use AWS CLI configuration
-aws configure
+$env:CLOUDFLARE_R2_ACCESS_KEY_ID="your_access_key"
+$env:CLOUDFLARE_R2_SECRET_ACCESS_KEY="your_secret_key"
+$env:CLOUDFLARE_R2_ACCOUNT_ID="your_account_id"
+$env:CLOUDFLARE_R2_BUCKET_NAME="your_bucket_name"
+$env:CLOUDFLARE_R2_ENDPOINT="https://<account_id>.r2.cloudflarestorage.com"
 ```
+
+Or configure them in `config.py`.
 
 ## Usage
 
@@ -106,7 +110,7 @@ This will:
 2. Get listings published yesterday
 3. Extract view counts for each listing
 4. Generate Excel files
-5. Upload to S3 with today's date partitioning
+5. Upload to Cloudflare R2 with today's date partitioning
 
 ### Custom Date
 
@@ -120,11 +124,11 @@ custom_date = datetime(2026, 1, 5)  # January 5, 2026
 results = await pipeline.run_pipeline(filter_date=custom_date)
 ```
 
-### Save Locally (No S3 Upload)
+### Save Locally (No R2 Upload)
 
 ```python
-# Disable S3 upload to save files locally
-results = await pipeline.run_pipeline(upload_to_s3=False)
+# Disable Cloudflare R2 upload to save files locally
+results = await pipeline.run_pipeline(upload_to_r2=False)
 ```
 
 Files will be saved in `temp_offices_excel/` folder.
@@ -151,7 +155,7 @@ Files will be saved in `temp_offices_excel/` folder.
 - Two sheets: "info" (office details) and "main" (listings)
 - Formatted with headers and appropriate column widths
 
-### Step 5: Upload to S3
+### Step 5: Upload to Cloudflare R2
 - Uploads to date-partitioned folders
 - Structure: `year=YYYY/month=MM/day=DD/`
 - Uses the filter date for partitioning
@@ -163,7 +167,7 @@ Files will be saved in `temp_offices_excel/` folder.
 OFFICE DATA PIPELINE - 2026-01-06 10:30:15
 ================================================================================
 Filter date: 2026-01-05
-Upload to S3: True
+Upload to Cloudflare R2: True
 ================================================================================
 
 STEP 1: Scraping office data from boshamlan.com
@@ -188,13 +192,13 @@ Generated Excel file: temp_offices_excel/مسكان_المتحدة_العقار�
 ✓ Generated 15 Excel files
 
 ================================================================================
-STEP 3: Uploading to S3
+STEP 3: Uploading to Cloudflare R2
 --------------------------------------------------------------------------------
-Uploading مسكان_المتحدة_العقارية.xlsx to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/...
-Successfully uploaded to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/مسكان_المتحدة_العقارية.xlsx
+Uploading مسكان_المتحدة_العقارية.xlsx to r2://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/...
+Successfully uploaded to r2://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/مسكان_المتحدة_العقارية.xlsx
 ...
 
-✓ Uploaded 15 files to S3
+✓ Uploaded 15 files to Cloudflare R2
 
 ================================================================================
 PIPELINE SUMMARY
@@ -202,11 +206,11 @@ PIPELINE SUMMARY
 Offices processed: 15
 Total listings: 186
 Excel files generated: 15
-Files uploaded to S3: 15
+Files uploaded to Cloudflare R2: 15
 
-S3 Locations:
-  Excel files: s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/
-  Images: s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/images/
+R2 Locations:
+  Excel files: r2://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/
+  Images: r2://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/images/
 ================================================================================
 
 ✓ Pipeline completed successfully!
@@ -230,7 +234,7 @@ S3 Locations:
 - Arabic office names are preserved in filenames
 - View counts may be None if scraping fails
 - Rate limiting between requests (0.5-1 second delays)
-- Temporary files are cleaned up after S3 upload
+- Temporary files are cleaned up after R2 upload
 
 ## Troubleshooting
 
@@ -239,8 +243,8 @@ S3 Locations:
 - Verify the website structure hasn't changed
 - Check internet connection
 
-### S3 upload fails
-- Verify AWS credentials are set correctly
+### R2 upload fails
+- Verify Cloudflare R2 credentials are set correctly
 - Check bucket permissions
 - Verify bucket name is correct
 

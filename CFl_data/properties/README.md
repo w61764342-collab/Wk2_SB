@@ -1,6 +1,6 @@
 # Properties Scraper - Boshamlan Real Estate Data Collection
 
-A sophisticated asynchronous web scraping system designed to extract real estate property data from Boshamlan.com and upload it to AWS S3 with organized date-based partitioning.
+A sophisticated asynchronous web scraping system designed to extract real estate property data from Boshamlan.com and upload it to Cloudflare R2 with organized date-based partitioning.
 
 ## 📋 Table of Contents
 
@@ -14,7 +14,7 @@ A sophisticated asynchronous web scraping system designed to extract real estate
 - [Project Structure](#project-structure)
 - [Data Flow](#data-flow)
 - [Output Format](#output-format)
-- [S3 Storage Structure](#s3-storage-structure)
+- [R2 Storage Structure](#r2-storage-structure)
 - [API Integration](#api-integration)
 - [Troubleshooting](#troubleshooting)
 - [Development & Testing](#development--testing)
@@ -23,12 +23,12 @@ A sophisticated asynchronous web scraping system designed to extract real estate
 
 ## 🎯 Overview
 
-This scraper system automates the extraction of property listings from Boshamlan.com, a real estate platform. It scrapes data from multiple categories (rent, sale, exchange) and their subcategories, downloads associated images, and organizes everything in AWS S3 with date-based partitioning for easy data lake management.
+This scraper system automates the extraction of property listings from Boshamlan.com, a real estate platform. It scrapes data from multiple categories (rent, sale, exchange) and their subcategories, downloads associated images, and organizes everything in Cloudflare R2 with date-based partitioning for easy data lake management.
 
 **Key Capabilities:**
 - Scrapes 3 main categories with 8+ subcategories each
 - Filters properties by date (yesterday and today only)
-- Downloads and uploads property images to S3
+- Downloads and uploads property images to Cloudflare R2
 - Creates Excel files with multiple sheets per category
 - Implements date-partitioned storage (year/month/day)
 - Uses both web scraping and API integration for comprehensive data
@@ -46,11 +46,11 @@ This scraper system automates the extraction of property listings from Boshamlan
 - **API Integration**: Fetches detailed property data from backend API
 
 ### Storage & Organization
-- **AWS S3 Integration**: Automatic upload to S3 buckets
+- **Cloudflare R2 Integration**: Automatic upload to Cloudflare R2 buckets
 - **Date Partitioning**: `year=YYYY/month=MM/day=DD` structure
 - **Excel Export**: Multi-sheet workbooks per category
 - **Image Management**: Organized by category with unique filenames
-- **Metadata Tracking**: S3 objects include upload metadata
+- **Metadata Tracking**: R2 objects include upload metadata
 
 ### Technical Features
 - **Asynchronous Operations**: Fast concurrent scraping using asyncio
@@ -91,7 +91,7 @@ This scraper system automates the extraction of property listings from Boshamlan
 #### 1. **main_s3.py** - MainS3Scraper
 - **Purpose**: Main orchestrator and entry point
 - **Responsibilities**:
-  - Initialize scrapers and S3 uploader
+  - Initialize scrapers and R2 uploader
   - Coordinate scraping workflow
   - Manage image uploads before Excel creation
   - Handle Excel file generation and upload
@@ -118,14 +118,14 @@ This scraper system automates the extraction of property listings from Boshamlan
   - Apply date filters
   - Handle pagination with smart scrolling
 
-#### 4. **S3Uploader.py** - S3Uploader
-- **Purpose**: AWS S3 integration
+#### 4. **S3Uploader.py** - R2 Uploader
+- **Purpose**: Cloudflare R2 integration
 - **Responsibilities**:
-  - Initialize boto3 S3 client
+  - Initialize Cloudflare R2 client
   - Upload Excel files with partitioning
   - Download and upload images asynchronously
-  - Generate S3 URIs for images
-  - Handle AWS credentials
+  - Generate R2 URIs for images
+  - Handle Cloudflare R2 credentials
   - Verify bucket accessibility
 
 ---
@@ -136,11 +136,11 @@ This scraper system automates the extraction of property listings from Boshamlan
 - Python 3.8 or higher
 - 4GB+ RAM recommended
 - Stable internet connection
-- AWS account with S3 access
+- Cloudflare account with R2 access
 
 ### Required Accounts
-- **AWS Account**: With S3 bucket access
-- **IAM Permissions**: `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`
+- **Cloudflare Account**: With R2 bucket access
+- **R2 Credentials**: Access key, secret key, and bucket name
 
 ---
 
@@ -182,63 +182,38 @@ playwright install chromium
 
 **Windows PowerShell:**
 ```powershell
-$env:AWS_ACCESS_KEY_ID="your-access-key"
-$env:AWS_SECRET_ACCESS_KEY="your-secret-key"
+$env:CLOUDFLARE_R2_ACCESS_KEY_ID="your-access-key"
+$env:CLOUDFLARE_R2_SECRET_ACCESS_KEY="your-secret-key"
+$env:CLOUDFLARE_R2_ACCOUNT_ID="your-account-id"
+$env:CLOUDFLARE_R2_BUCKET_NAME="your-bucket-name"
 ```
 
 **Linux/Mac Bash:**
 ```bash
-export AWS_ACCESS_KEY_ID="your-access-key"
-export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export CLOUDFLARE_R2_ACCESS_KEY_ID="your-access-key"
+export CLOUDFLARE_R2_SECRET_ACCESS_KEY="your-secret-key"
+export CLOUDFLARE_R2_ACCOUNT_ID="your-account-id"
+export CLOUDFLARE_R2_BUCKET_NAME="your-bucket-name"
 ```
 
-### Option 2: AWS Credentials File
-Create/edit `~/.aws/credentials`:
-```ini
-[default]
-aws_access_key_id = your-access-key
-aws_secret_access_key = your-secret-key
-region = us-east-1
+### Option 2: Cloudflare R2 Credentials File
+Create/edit `config.py` with your Cloudflare R2 credentials:
+```python
+CLOUDFLARE_R2_ACCESS_KEY_ID = 'your-access-key'
+CLOUDFLARE_R2_SECRET_ACCESS_KEY = 'your-secret-key'
+CLOUDFLARE_R2_ACCOUNT_ID = 'your-account-id'
+CLOUDFLARE_R2_BUCKET_NAME = 'your-bucket-name'
+CLOUDFLARE_R2_ENDPOINT = 'https://<account_id>.r2.cloudflarestorage.com'
 ```
 
-### Option 3: Configuration File
-1. Copy example config:
-   ```bash
-   copy config.example.py config.py  # Windows
-   cp config.example.py config.py     # Linux/Mac
-   ```
+### R2 Bucket Configuration
 
-2. Edit `config.py` with your values:
-   ```python
-   AWS_ACCESS_KEY_ID = 'your-access-key'
-   AWS_SECRET_ACCESS_KEY = 'your-secret-key'
-   S3_BUCKET_NAME = 'your-bucket-name'
-   ```
+**Required Bucket**: your Cloudflare R2 bucket name
 
-### S3 Bucket Configuration
-
-**Required Bucket**: `data-collection-dl` (default)
-
-**IAM Policy Example**:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::data-collection-dl",
-        "arn:aws:s3:::data-collection-dl/*"
-      ]
-    }
-  ]
-}
-```
+**Cloudflare R2 Notes**:
+- Use the Cloudflare dashboard to create an R2 bucket.
+- Ensure the access key and secret key are enabled for R2 usage.
+- If your code uses an endpoint URL, set it to the R2 endpoint for your account.
 
 ---
 
@@ -256,35 +231,35 @@ python main_s3.py
 The scraper executes a **4-step workflow**:
 
 ```
-Step 1: Check S3 bucket accessibility
-  └─ Verifies AWS credentials and bucket permissions
+Step 1: Check R2 bucket accessibility
+  └─ Verifies Cloudflare R2 credentials and bucket permissions
 
 Step 2: Scrape data from all categories
   ├─ Rent (8 subcategories)
   ├─ Sale (8 subcategories)
   └─ Exchange (2 subcategories)
 
-Step 3: Upload images to S3
+Step 3: Upload images to Cloudflare R2
   └─ Downloads and uploads all property images
 
 Step 4: Create and upload Excel files
   ├─ Generate multi-sheet Excel workbooks
-  └─ Upload to S3 with date partitioning
+  └─ Upload to Cloudflare R2 with date partitioning
 ```
 
 ### Expected Output
 
 ```
 ================================================================================
-BOSHAMLAN SCRAPER - S3 Edition
+BOSHAMLAN SCRAPER - Cloudflare R2 Edition
 ================================================================================
 Started at: 2026-02-22 10:30:45
-Target S3: s3://data-collection-dl/boshamlan-data/properties/
+Target R2: r2://data-collection-dl/boshamlan-data/properties/
   - Excel files -> year=YYYY/month=MM/day=DD/excel files/
   - Images -> year=YYYY/month=MM/day=DD/images/
 ================================================================================
 
-[1/4] Checking S3 bucket accessibility...
+[1/4] Checking R2 bucket accessibility...
 ✓ Bucket 'data-collection-dl' exists and is accessible
 
 [2/4] Scraping data from all categories...
@@ -296,22 +271,22 @@ Found 150 cards on page
 ✓ Found 32 items for شقة
 ... (continues for all subcategories)
 
-[3/4] Uploading images to S3...
-✓ Successfully uploaded 245 image(s) to S3
+[3/4] Uploading images to Cloudflare R2...
+✓ Successfully uploaded 245 image(s) to Cloudflare R2
 
 [4/4] Creating and uploading Excel files...
-✓ Successfully uploaded 3 Excel file(s) to S3:
-  - rent: s3://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/rent.xlsx
-  - sale: s3://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/sale.xlsx
-  - exchange: s3://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/exchange.xlsx
+✓ Successfully uploaded 3 Excel file(s) to Cloudflare R2:
+  - rent: r2://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/rent.xlsx
+  - sale: r2://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/sale.xlsx
+  - exchange: r2://data-collection-dl/boshamlan-data/properties/year=2026/month=02/day=22/excel files/exchange.xlsx
 
 ================================================================================
 SCRAPING COMPLETED
 ================================================================================
 Finished at: 2026-02-22 10:45:30
 Categories processed: 3
-Images uploaded to S3: 245
-Excel files uploaded to S3: 3
+Images uploaded to Cloudflare R2: 245
+Excel files uploaded to Cloudflare R2: 3
 ================================================================================
 ```
 
@@ -329,12 +304,12 @@ async def main():
 asyncio.run(main())
 ```
 
-#### Local Testing (No S3)
+#### Local Testing (No R2)
 Use the standalone CategoryScraper:
 ```bash
 python CategoryScraper.py
 ```
-This will scrape data and save Excel files locally to `scraped_data/` folder without uploading to S3.
+This will scrape data and save Excel files locally to `scraped_data/` folder without uploading to R2.
 
 ---
 
@@ -346,7 +321,7 @@ properties/
 ├── main_s3.py                  # Main entry point and orchestrator
 ├── CategoryScraper.py          # Category-level scraping coordinator
 ├── PropertyCardScraper.py      # Individual property card scraper
-├── S3Uploader.py              # AWS S3 upload handler
+├── S3Uploader.py              # Cloudflare R2 upload handler
 │
 ├── config.example.py          # Example configuration file
 ├── debug_scraper.py           # Debug tool for selector testing
@@ -365,7 +340,7 @@ properties/
 | **main_s3.py** | 173 | Main orchestrator - coordinates entire scraping and upload workflow |
 | **CategoryScraper.py** | 262 | Manages categories, builds URLs, coordinates subcategory scraping |
 | **PropertyCardScraper.py** | 434 | Core scraper - extracts data from web pages and API |
-| **S3Uploader.py** | 354 | Handles all AWS S3 operations (uploads, downloads, partitioning) |
+| **S3Uploader.py** | 354 | Handles all Cloudflare R2 operations (uploads, downloads, partitioning) |
 | **debug_scraper.py** | 56 | Debug tool for testing selectors and troubleshooting |
 | **config.example.py** | 56 | Template for configuration settings |
 
@@ -384,12 +359,12 @@ properties/
                ┌─────────────────────────┐
                │   Initialize Components  │
                │  - CategoryScraper      │
-               │  - S3Uploader           │
+               │  - R2Uploader           │
                └────────────┬────────────┘
                             │
                             ▼
                ┌─────────────────────────┐
-               │  Step 1: Check S3       │
+               │  Step 1: Check R2       │
                │  Verify bucket access   │
                └────────────┬────────────┘
                             │
@@ -424,12 +399,12 @@ properties/
                                 │
                                 ▼
         ┌──────────────────────────────────────┐
-        │  Step 3: Upload Images to S3         │
+        │  Step 3: Upload Images to R2         │
         │  For all scraped cards:              │
         │   1. Extract image URLs              │
         │   2. Download images                 │
-        │   3. Upload to S3 /images/ folder    │
-        │   4. Create URL ↔ S3 URI mapping    │
+        │   3. Upload to R2 /images/ folder    │
+        │   4. Create URL ↔ R2 URI mapping    │
         └──────────┬───────────────────────────┘
                    │
                    ▼
@@ -439,25 +414,25 @@ properties/
         │   1. Create Excel with sheets        │
         │   2. Add image_s3_path column        │
         │   3. Save locally                    │
-        │   4. Upload to S3 /excel files/      │
+        │   4. Upload to R2 /excel files/      │
         └──────────┬───────────────────────────┘
                    │
                    ▼
         ┌──────────────────────────────────────┐
         │  Final Summary & Cleanup             │
         │  - Display statistics                │
-        │  - Report S3 URIs                    │
+        │  - Report R2 URIs                    │
         └──────────────────────────────────────┘
 ```
 
 ### Step-by-Step Process
 
 1. **Initialization**
-   - Load AWS credentials
-   - Initialize S3 client
+   - Load Cloudflare R2 credentials
+   - Initialize R2 client
    - Create CategoryScraper instance
 
-2. **S3 Verification**
+2. **R2 Verification**
    - Check bucket existence
    - Verify access permissions
    - Fail fast if credentials invalid
@@ -481,8 +456,8 @@ properties/
    - Extract all unique image URLs
    - Download images asynchronously
    - Generate unique filenames
-   - Upload to S3 with date partitioning
-   - Create mapping: `original_url → s3://path`
+   - Upload to Cloudflare R2 with date partitioning
+   - Create mapping: `original_url → r2://path`
 
 5. **Excel Generation & Upload**
    - For each category:
@@ -490,8 +465,8 @@ properties/
      - Create sheet for each subcategory
      - Add `image_s3_path` column using mapping
      - Save locally to `scraped_data/`
-     - Upload to S3 with date partitioning
-     - Report S3 URI
+     - Upload to Cloudflare R2 with date partitioning
+     - Report R2 URI
 
 ---
 
@@ -518,7 +493,7 @@ Each row represents one property listing:
 | `is_featured` | Boolean | Premium listing flag | `True` / `False` |
 | `description` | String | Property description | "شقة واسعة ونظيفة..." |
 | `image_url` | URL | Original image URL | "https://cdn.boshamlan.com/..." |
-| `image_s3_path` | S3 URI | S3 location of image | "s3://bucket/..." |
+| `image_s3_path` | R2 URI | Cloudflare R2 location of image | "r2://bucket/..." |
 | `link` | URL | Property detail page | "https://boshamlan.com/property/..." |
 | `mobile_number` | String | Contact phone | "+966501234567" |
 | `views_number` | String | View count | "150" |
@@ -527,17 +502,17 @@ Each row represents one property listing:
 
 ```csv
 title,price,relative_date,date_published,is_featured,description,image_url,image_s3_path,link,mobile_number,views_number
-"شقة للإيجار في الرياض","2000","3 ساعة","2026-02-22T07:30:00+03:00",False,"شقة 3 غرف نوم...","https://cdn.boshamlan.com/image1.jpg","s3://data-collection-dl/.../image1.jpg","https://boshamlan.com/property/12345","+966501234567","45"
+"شقة للإيجار في الرياض","2000","3 ساعة","2026-02-22T07:30:00+03:00",False,"شقة 3 غرف نوم...","https://cdn.boshamlan.com/image1.jpg","r2://data-collection-dl/.../image1.jpg","https://boshamlan.com/property/12345","+966501234567","45"
 ```
 
 ---
 
-## 🗄️ S3 Storage Structure
+## 🗄️ Cloudflare R2 Storage Structure
 
 ### Directory Layout
 
 ```
-s3://data-collection-dl/
+r2://data-collection-dl/
 └── boshamlan-data/
     └── properties/
         └── year=2026/
@@ -564,12 +539,12 @@ s3://data-collection-dl/
 **Format**: `year=YYYY/month=MM/day=DD`
 
 **Benefits**:
-- Efficient querying with AWS Athena
+- Efficient querying in data lake architectures
 - Easy data lifecycle management
 - Cost-effective storage organization
-- Compatible with data lake architectures
+- Compatible with Cloudflare R2 partitioning
 
-### S3 Object Metadata
+### R2 Object Metadata
 
 Each uploaded file includes metadata:
 
@@ -641,19 +616,19 @@ The scraper combines **HTML scraping** + **API calls**:
 
 ### Common Issues
 
-#### 1. No AWS Credentials Error
+#### 1. No Cloudflare R2 Credentials Error
 
 **Symptom**:
 ```
-ERROR: No AWS credentials found
+ERROR: No Cloudflare R2 credentials found
 ```
 
 **Solution**:
 - Set environment variables (see [Configuration](#configuration))
-- Or create `~/.aws/credentials` file
-- Verify credentials are correct
+- Or provide credentials in `config.py`
+- Verify keys and bucket names are correct
 
-#### 2. S3 Bucket Access Denied
+#### 2. R2 Bucket Access Denied
 
 **Symptom**:
 ```
@@ -662,9 +637,9 @@ ERROR: Access denied to bucket 'data-collection-dl'
 
 **Solution**:
 - Check bucket name is correct
-- Verify IAM permissions include `s3:PutObject`, `s3:ListBucket`
-- Check bucket policy allows your IAM user
-- Ensure bucket is in correct region
+- Verify R2 access keys are enabled
+- Check your Cloudflare account permissions
+- Ensure the endpoint and account ID are correct
 
 #### 3. No Cards Found
 
@@ -753,14 +728,14 @@ async def test():
 asyncio.run(test())
 ```
 
-#### Test Without S3
+#### Test Without R2
 ```bash
 # Run CategoryScraper independently
 python CategoryScraper.py
 ```
-Saves Excel files locally to `scraped_data/` without S3 upload.
+Saves Excel files locally to `scraped_data/` without R2 upload.
 
-#### Test S3 Upload Only
+#### Test R2 Upload Only
 ```python
 # In S3Uploader.py
 uploader = S3Uploader()
@@ -817,7 +792,7 @@ cutoff_date = datetime.now() - timedelta(days=days_back)
 - **Properties Scraped**: 150-300 items
 - **Images Uploaded**: 150-300 images
 - **Excel Files Created**: 3 files
-- **S3 Uploads**: ~300 objects total
+- **R2 Uploads**: ~300 objects total
 
 ### Resource Usage
 
@@ -835,13 +810,13 @@ cutoff_date = datetime.now() - timedelta(days=days_back)
 
 3. **Featured Detection**: Identifies premium "مميز" listings with special flag.
 
-4. **Image Handling**: Images are downloaded once, uploaded to S3, then the local file is discarded to save disk space.
+4. **Image Handling**: Images are downloaded once, uploaded to Cloudflare R2, then the local file is discarded to save disk space.
 
 5. **Excel Format**: Uses `xlsxwriter` engine for better compatibility and performance.
 
 6. **Error Recovery**: If a subcategory fails, the scraper continues with others rather than stopping entirely.
 
-7. **S3 Costs**: Consider S3 storage costs when running daily. Adjust lifecycle policies to archive or delete old data.
+7. **R2 Costs**: Consider R2 storage costs when running daily. Adjust lifecycle policies to archive or delete old data.
 
 ---
 
@@ -850,9 +825,9 @@ cutoff_date = datetime.now() - timedelta(days=days_back)
 To contribute improvements:
 
 1. Test changes thoroughly with `debug_scraper.py`
-2. Ensure AWS credentials are not committed
+2. Ensure Cloudflare R2 credentials are not committed
 3. Update this README if adding new features
-4. Verify S3 partitioning remains consistent
+4. Verify R2 partitioning remains consistent
 
 ---
 
@@ -861,7 +836,7 @@ To contribute improvements:
 For issues or questions:
 - Check [Troubleshooting](#troubleshooting) section
 - Run `debug_scraper.py` for diagnostics
-- Verify AWS credentials and permissions first
+- Verify Cloudflare R2 credentials and permissions first
 
 ---
 
