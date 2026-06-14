@@ -209,17 +209,33 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
         # Column headers (first row)
         first_row = next(ws.iter_rows(min_row=1, max_row=1), [])
         actual_cols = [cell.value for cell in first_row if cell.value is not None]
-        missing = [c for c in required_cols if c not in actual_cols]
-        checks.append(
-            {
-                "check": f"columns:{sheet_name}",
-                "pass": not missing,
-                "detail": f"missing: {missing}" if missing else "ok",
-            }
-        )
 
         # Row count (data rows only, header excluded)
         row_count = max(0, ws.max_row - 1)
+
+        optional_cols = sheet_schema.get("optional_columns", [])
+        cols_to_check = list(required_cols)
+        if row_count > 0:
+            cols_to_check.extend(optional_cols)
+
+        if row_count == 0 and not actual_cols:
+            checks.append(
+                {
+                    "check": f"columns:{sheet_name}",
+                    "pass": True,
+                    "detail": "empty sheet (no headers)",
+                }
+            )
+        else:
+            missing = [c for c in cols_to_check if c not in actual_cols]
+            checks.append(
+                {
+                    "check": f"columns:{sheet_name}",
+                    "pass": not missing,
+                    "detail": f"missing: {missing}" if missing else "ok",
+                }
+            )
+
         in_range = row_range[0] <= row_count <= row_range[1]
         checks.append(
             {
@@ -232,12 +248,12 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
     return checks
 
 
-def quality_checks(wb: openpyxl.Workbook, schema_entry: dict) -> list:
+def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: datetime) -> list:
     """Deep data-quality checks using pandas (only with --quality flag)."""
     import pandas as pd
 
     checks = []
-    yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    expected_date_str = check_date.strftime("%Y-%m-%d")
 
     for sheet_schema in schema_entry.get("sheets", []):
         sheet_name = sheet_schema["name"]
@@ -276,17 +292,17 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict) -> list:
                 }
             )
 
-        # Stale date % (date_published not from yesterday)
+        # Stale date % (date_published not from the partition date being checked)
         if "date_published" in df.columns:
             stale = df["date_published"].apply(
-                lambda v: bool(v) and not str(v).startswith(yesterday_str)
+                lambda v: bool(v) and not str(v).startswith(expected_date_str)
             )
             pct = stale.sum() / n * 100
             checks.append(
                 {
                     "check": f"quality:stale_date_pct:{sheet_name}",
                     "pass": pct < 20.0,
-                    "detail": f"{pct:.1f}% stale (expected < 20%)",
+                    "detail": f"{pct:.1f}% stale (expected < 20% for {expected_date_str})",
                 }
             )
 
@@ -471,7 +487,7 @@ def main():
 
                     checks = validate_file(wb, schema_entry, file_size)
                     if args.quality:
-                        checks += quality_checks(wb, schema_entry)
+                        checks += quality_checks(wb, schema_entry, check_date)
 
                     passed = sum(1 for c in checks if c["pass"])
                     total = len(checks)
