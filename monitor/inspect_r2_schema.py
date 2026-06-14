@@ -266,6 +266,38 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
     return checks
 
 
+def _parse_office_published_date(value):
+    """Parse Date Published from Excel (datetime, DD-MM-YYYY string, or ISO)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "date") and callable(value.date):
+        return value.date()
+    text = str(value).strip()
+    for fmt, length in (("%d-%m-%Y", 10), ("%Y-%m-%d", 10), ("%Y-%m-%d %H:%M:%S", 19)):
+        try:
+            return datetime.strptime(text[:length], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _office_date_is_stale(value, check_date: datetime) -> bool:
+    """True when published date falls outside the scraper's expected window.
+
+    The offices scraper keeps listings with datePublished >= filter_date
+    (yesterday at 00:00).  For a partition dated *check_date*, valid ads
+    span check_date - 1 day through check_date inclusive.
+    """
+    published = _parse_office_published_date(value)
+    if published is None:
+        return False
+    check_day = check_date.date() if isinstance(check_date, datetime) else check_date
+    window_start = check_day - timedelta(days=1)
+    return published < window_start or published > check_day
+
+
 def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: datetime) -> list:
     """Deep data-quality checks using pandas (only with --quality flag)."""
     import pandas as pd
@@ -307,14 +339,15 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
             price_threshold = sheet_schema.get("quality_thresholds", {}).get(
                 "null_price_max_pct", 50.0
             )
-            pct = df[price_col].isna().sum() / n * 100
-            checks.append(
-                {
-                    "check": f"quality:null_{price_col}_pct:{sheet_name}",
-                    "pass": pct < price_threshold,
-                    "detail": f"{pct:.1f}% (threshold {price_threshold:.0f}%)",
-                }
-            )
+            if price_threshold < 100:
+                pct = df[price_col].isna().sum() / n * 100
+                checks.append(
+                    {
+                        "check": f"quality:null_{price_col}_pct:{sheet_name}",
+                        "pass": pct <= price_threshold,
+                        "detail": f"{pct:.1f}% (max {price_threshold:.0f}%)",
+                    }
+                )
 
         # Stale date % — properties use "date_published" (ISO, YYYY-MM-DD prefix);
         # offices use "Date Published" (DD-MM-YYYY exact match from format_date()).
@@ -331,16 +364,24 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
                 }
             )
         elif "Date Published" in df.columns:
-            expected_ddmmyyyy = check_date.strftime("%d-%m-%Y")
+            check_day = check_date.date() if isinstance(check_date, datetime) else check_date
+            window_start = (check_day - timedelta(days=1)).strftime("%d-%m-%Y")
+            window_end = check_day.strftime("%d-%m-%Y")
             stale = df["Date Published"].apply(
-                lambda v: bool(v) and str(v) != expected_ddmmyyyy
+                lambda v: _office_date_is_stale(v, check_date)
             )
             pct = stale.sum() / n * 100
+            stale_threshold = sheet_schema.get("quality_thresholds", {}).get(
+                "stale_date_max_pct", 20.0
+            )
             checks.append(
                 {
                     "check": f"quality:stale_date_pct:{sheet_name}",
-                    "pass": pct < 20.0,
-                    "detail": f"{pct:.1f}% stale (expected < 20% for {expected_ddmmyyyy})",
+                    "pass": pct <= stale_threshold,
+                    "detail": (
+                        f"{pct:.1f}% stale "
+                        f"(max {stale_threshold:.0f}%; window {window_start}–{window_end})"
+                    ),
                 }
             )
 
