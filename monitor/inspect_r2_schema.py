@@ -170,6 +170,21 @@ def upload_bytes(
     client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
 
 
+def json_safe(value):
+    """Recursively convert numpy/pandas scalars to native Python types for JSON."""
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_safe(v) for v in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, str)) or value is None:
+        return value
+    if hasattr(value, "item"):
+        return json_safe(value.item())
+    return value
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: int) -> list:
     """Return a list of check-result dicts for one Excel file."""
@@ -566,7 +581,7 @@ def main():
     report_key = f"{r2_prefix}/monitor/{end_date.strftime('%Y-%m-%d')}/report.json"
     upload_bytes(
         client, bucket, report_key,
-        json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"),
+        json.dumps(json_safe(report), ensure_ascii=False, indent=2).encode("utf-8"),
         "application/json",
     )
     print(f"  Report uploaded → r2://{bucket}/{report_key}")
