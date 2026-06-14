@@ -26,6 +26,12 @@ Required environment variables (same as scraper workflows)
     CF_R2_ENDPOINT_URL
     CF_R2_BUCKET_NAME
 
+Config
+------
+    websites-config.yml is read from R2 at
+    {r2_prefix}/monitor/websites-config.yml (default: boshamlan-data/monitor/).
+    A local repo copy is used only as a development fallback.
+
 Outputs
 -------
     stdout              — summary table
@@ -51,6 +57,8 @@ from botocore.exceptions import ClientError
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent.parent / "websites-config.yml"
+CONFIG_R2_SUFFIX = "monitor/websites-config.yml"
+DEFAULT_R2_PREFIX = "boshamlan-data"
 EXCEL_FOLDER = "excel files"  # folder name used by both S3Uploader.py variants
 
 
@@ -136,6 +144,24 @@ def load_existing_stats(client, bucket: str, stats_key: str) -> dict:
         if exc.response["Error"]["Code"] in ("NoSuchKey", "404"):
             return {}
         raise
+
+
+def load_config(client, bucket: str, r2_prefix: str) -> dict:
+    """Load websites-config.yml from R2; fall back to local file for development."""
+    config_key = f"{r2_prefix}/{CONFIG_R2_SUFFIX}"
+    try:
+        data = download_object(client, bucket, config_key)
+        print(f"  Config loaded  ← r2://{bucket}/{config_key}")
+        return yaml.safe_load(data) or {}
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] not in ("NoSuchKey", "404"):
+            raise
+        if CONFIG_PATH.exists():
+            print(f"  Config loaded  ← {CONFIG_PATH} (local fallback)")
+            return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        print(f"ERROR: websites-config.yml not found at r2://{bucket}/{config_key}")
+        print(f"       and no local fallback at {CONFIG_PATH}")
+        sys.exit(1)
 
 
 def upload_bytes(
@@ -359,11 +385,17 @@ def write_step_summary(report: dict):
 def main():
     args = parse_args()
 
-    # Load config
-    config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    # Bootstrap R2 client before config (config lives in R2, not in the repo)
+    r2_prefix = os.environ.get("MONITOR_R2_PREFIX", DEFAULT_R2_PREFIX)
+    bucket = os.environ.get("CF_R2_BUCKET_NAME")
+    if not bucket:
+        print("ERROR: CF_R2_BUCKET_NAME environment variable is required.")
+        sys.exit(1)
+    client = build_r2_client()
+
+    config = load_config(client, bucket, r2_prefix)
     meta = config.get("meta", {})
-    r2_prefix = meta.get("r2_prefix", "boshamlan-data")
-    bucket = os.environ.get("CF_R2_BUCKET_NAME") or meta.get("r2_bucket", "data-collection-dl")
+    r2_prefix = meta.get("r2_prefix", r2_prefix)
 
     scrapers_conf = {s["name"]: s for s in config.get("scrapers", [])}
     schema_map = {e["scraper"]: e for e in config.get("excel_schema", [])}
@@ -371,8 +403,6 @@ def main():
     if not schema_map:
         print("ERROR: No excel_schema found in websites-config.yml — run the excel-schema prompt first.")
         sys.exit(1)
-
-    client = build_r2_client()
 
     # Date range
     if args.date:
