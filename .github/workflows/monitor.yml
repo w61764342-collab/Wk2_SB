@@ -1,0 +1,149 @@
+name: R2 Schema Monitor
+
+on:
+  # ── Primary trigger: run automatically after daily_r2.yml finishes ─────────
+  workflow_run:
+    workflows: ["Daily Pipeline (Cloudflare R2)"]
+    types: [completed]   # fires on success OR failure (lets us report missing files)
+
+  # ── Fallback cron: catches any day the workflow_run event is missed ─────────
+  schedule:
+    - cron: '0 8 * * 1-6'   # Mon–Sat — daily validation (checks yesterday)
+    - cron: '0 9 * * 0'     # Sunday  — weekly stats refresh (7-day lookback)
+
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to validate (YYYY-MM-DD, default: yesterday UTC)'
+        required: false
+        type: string
+        default: ''
+      days_lookback:
+        description: 'Number of consecutive days to check'
+        required: false
+        type: string
+        default: '1'
+      update_stats:
+        description: 'Merge observations into monitor_stats.yml in R2'
+        required: false
+        type: boolean
+        default: false
+      quality_checks:
+        description: 'Run deep data-quality checks (pandas)'
+        required: false
+        type: boolean
+        default: false
+      fail_on_error:
+        description: 'Exit 1 if any check fails (marks workflow as failed)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Primary: triggered by daily_r2.yml completion OR fallback cron ──────────
+  daily-check:
+    name: Daily Schema Check
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_run' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1-6')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build CLI flags
+        id: flags
+        run: |
+          FLAGS=""
+
+          # workflow_run: scraper uploads with TODAY's date partition, not yesterday's.
+          # workflow_dispatch: honour the explicit --date input if provided.
+          # schedule/fallback: no --date flag → script defaults to yesterday UTC.
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            FLAGS="$FLAGS --date $(date -u +%Y-%m-%d)"
+          elif [[ "${{ github.event.inputs.date }}" != "" ]]; then
+            FLAGS="$FLAGS --date ${{ github.event.inputs.date }}"
+          fi
+
+          # --days-lookback
+          LOOKBACK="${{ github.event.inputs.days_lookback }}"
+          if [[ -n "$LOOKBACK" && "$LOOKBACK" != "1" ]]; then
+            FLAGS="$FLAGS --days-lookback $LOOKBACK"
+          fi
+
+          # --update-stats
+          if [[ "${{ github.event.inputs.update_stats }}" == "true" ]]; then
+            FLAGS="$FLAGS --update-stats"
+          fi
+
+          # --quality
+          if [[ "${{ github.event.inputs.quality_checks }}" == "true" ]]; then
+            FLAGS="$FLAGS --quality"
+          fi
+
+          # --fail-on-error
+          if [[ "${{ github.event.inputs.fail_on_error }}" == "true" ]]; then
+            FLAGS="$FLAGS --fail-on-error"
+          fi
+
+          echo "flags=$FLAGS" >> $GITHUB_OUTPUT
+          echo "Flags: $FLAGS"
+
+      - name: Run schema validator
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+        run: |
+          python monitor/inspect_r2_schema.py ${{ steps.flags.outputs.flags }}
+
+  # ── Sunday: 7-day lookback + update persisted stats ───────────────────────
+  weekly-stats:
+    name: Weekly Stats Refresh
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'schedule' && github.event.schedule == '0 9 * * 0'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run weekly stats refresh
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+        run: |
+          python monitor/inspect_r2_schema.py \
+            --days-lookback 7 \
+            --update-stats \
+            --quality

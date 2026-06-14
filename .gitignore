@@ -1,6 +1,14 @@
 
+# Monitor auto-generated outputs (stored in R2, never committed)
+monitor_stats.yml
+monitor/report_*.json
+
 offices/__init__.py
 skill.md
 websites-config-template.yml
 websites-config-prompt.md
 websites-config.yml
+prompts/monitor-prompt.md
+prompts/excel-schema-prompt.md
+prompts/*
+monitor.md
