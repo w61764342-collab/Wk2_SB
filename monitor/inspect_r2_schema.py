@@ -298,15 +298,21 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
                 }
             )
 
-        # Null price / Price %
+        # Null price / Price %.
+        # Threshold is configurable via quality_thresholds.null_price_max_pct in
+        # the sheet schema (default 50%).  Offices routinely omit prices so their
+        # main sheet sets this to 100 to suppress false-positive failures.
         price_col = next((c for c in ["price", "Price"] if c in df.columns), None)
         if price_col:
+            price_threshold = sheet_schema.get("quality_thresholds", {}).get(
+                "null_price_max_pct", 50.0
+            )
             pct = df[price_col].isna().sum() / n * 100
             checks.append(
                 {
                     "check": f"quality:null_{price_col}_pct:{sheet_name}",
-                    "pass": pct < 50.0,
-                    "detail": f"{pct:.1f}%",
+                    "pass": pct < price_threshold,
+                    "detail": f"{pct:.1f}% (threshold {price_threshold:.0f}%)",
                 }
             )
 
