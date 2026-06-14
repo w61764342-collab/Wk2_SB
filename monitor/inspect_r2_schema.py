@@ -61,6 +61,12 @@ CONFIG_R2_SUFFIX = "monitor/websites-config.yml"
 DEFAULT_R2_PREFIX = "boshamlan-data"
 EXCEL_FOLDER = "excel files"  # folder name used by both S3Uploader.py variants
 
+# Adaptive row-count bounds kick in after this many observed runs in monitor_stats.yml.
+ADAPTIVE_MIN_RUNS = 3
+ROW_COUNT_MARGIN_ABS = 5
+ROW_COUNT_MARGIN_RATIO = 0.25
+DEFAULT_MIN_ROWS_FOR_QUALITY = 5
+
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
@@ -187,7 +193,45 @@ def json_safe(value):
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
-def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: int) -> list:
+def resolve_row_count_range(
+    sheet_schema: dict,
+    scraper_name: str,
+    sheet_name: str,
+    persisted_stats: dict | None,
+) -> tuple[list[int], str]:
+    """Return (effective [min, max], source label) for row_count validation."""
+    static_range = list(sheet_schema.get("row_count_range", [0, 999_999]))
+    if not persisted_stats:
+        return static_range, "static"
+
+    scraper_stats = persisted_stats.get(scraper_name, {})
+    if scraper_stats.get("runs_observed", 0) < ADAPTIVE_MIN_RUNS:
+        return static_range, "static"
+
+    sheet_stats = scraper_stats.get("sheets", {}).get(sheet_name, {})
+    hist_min = sheet_stats.get("row_count_min")
+    hist_max = sheet_stats.get("row_count_max")
+    if hist_min is None or hist_max is None:
+        return static_range, "static"
+
+    margin_low = max(ROW_COUNT_MARGIN_ABS, int(hist_min * ROW_COUNT_MARGIN_RATIO))
+    margin_high = max(ROW_COUNT_MARGIN_ABS, int(hist_max * ROW_COUNT_MARGIN_RATIO))
+    adaptive_low = max(0, hist_min - margin_low)
+    adaptive_high = hist_max + margin_high
+    effective = [
+        min(static_range[0], adaptive_low),
+        max(static_range[1], adaptive_high),
+    ]
+    return effective, "adaptive"
+
+
+def validate_file(
+    wb: openpyxl.Workbook,
+    schema_entry: dict,
+    file_size_bytes: int,
+    scraper_name: str = "",
+    persisted_stats: dict | None = None,
+) -> list:
     """Return a list of check-result dicts for one Excel file."""
     checks = []
     sheet_names = wb.sheetnames
@@ -206,7 +250,9 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
     for sheet_schema in schema_entry.get("sheets", []):
         sheet_name = sheet_schema["name"]
         required_cols = sheet_schema.get("required_columns", [])
-        row_range = sheet_schema.get("row_count_range", [0, 999_999])
+        row_range, range_source = resolve_row_count_range(
+            sheet_schema, scraper_name, sheet_name, persisted_stats
+        )
 
         # Sheet exists?
         if sheet_name not in sheet_names:
@@ -255,19 +301,22 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
             )
 
         in_range = row_range[0] <= row_count <= row_range[1]
+        range_label = "adaptive" if range_source == "adaptive" else "static"
         checks.append(
             {
                 "check": f"row_count:{sheet_name}",
                 "pass": in_range,
-                "detail": f"{row_count} rows (expected [{row_range[0]}, {row_range[1]}])",
+                "detail": (
+                    f"{row_count} rows (expected [{row_range[0]}, {row_range[1]}], {range_label})"
+                ),
             }
         )
 
     return checks
 
 
-def _parse_office_published_date(value):
-    """Parse Date Published from Excel (datetime, DD-MM-YYYY string, or ISO)."""
+def _parse_published_date(value):
+    """Parse date_published / Date Published from Excel (ISO, DD-MM-YYYY, datetime)."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if isinstance(value, datetime):
@@ -283,14 +332,15 @@ def _parse_office_published_date(value):
     return None
 
 
-def _office_date_is_stale(value, check_date: datetime) -> bool:
+def _published_date_is_stale(value, check_date: datetime) -> bool:
     """True when published date falls outside the scraper's expected window.
 
-    The offices scraper keeps listings with datePublished >= filter_date
-    (yesterday at 00:00).  For a partition dated *check_date*, valid ads
-    span check_date - 1 day through check_date inclusive.
+    Property and office scrapers keep listings from yesterday 00:00 UTC through
+    the partition date.  For a partition dated *check_date*, valid ads span
+    check_date - 1 day through check_date inclusive (calendar date of
+    date_published / Date Published).
     """
-    published = _parse_office_published_date(value)
+    published = _parse_published_date(value)
     if published is None:
         return False
     check_day = check_date.date() if isinstance(check_date, datetime) else check_date
@@ -303,7 +353,9 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
     import pandas as pd
 
     checks = []
-    expected_date_str = check_date.strftime("%Y-%m-%d")
+    check_day = check_date.date() if isinstance(check_date, datetime) else check_date
+    window_start = (check_day - timedelta(days=1)).strftime("%Y-%m-%d")
+    window_end = check_day.strftime("%Y-%m-%d")
 
     for sheet_schema in schema_entry.get("sheets", []):
         sheet_name = sheet_schema["name"]
@@ -316,6 +368,11 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
         df = pd.DataFrame(rows[1:], columns=rows[0])
         n = len(df)
         if n == 0:
+            continue
+
+        thresholds = sheet_schema.get("quality_thresholds", {})
+        min_rows = thresholds.get("min_rows_for_quality", DEFAULT_MIN_ROWS_FOR_QUALITY)
+        if n < min_rows:
             continue
 
         # Null title / Name %
@@ -336,9 +393,7 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
         # main sheet sets this to 100 to suppress false-positive failures.
         price_col = next((c for c in ["price", "Price"] if c in df.columns), None)
         if price_col:
-            price_threshold = sheet_schema.get("quality_thresholds", {}).get(
-                "null_price_max_pct", 50.0
-            )
+            price_threshold = thresholds.get("null_price_max_pct", 50.0)
             if price_threshold < 100:
                 pct = df[price_col].isna().sum() / n * 100
                 checks.append(
@@ -349,31 +404,15 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
                     }
                 )
 
-        # Stale date % — properties use "date_published" (ISO, YYYY-MM-DD prefix);
-        # offices use "Date Published" (DD-MM-YYYY exact match from format_date()).
-        if "date_published" in df.columns:
-            stale = df["date_published"].apply(
-                lambda v: bool(v) and not str(v).startswith(expected_date_str)
-            )
+        # Stale date % — properties (ISO date_published) and offices (Date Published)
+        # both use the scraper's 2-day window: partition_date-1 .. partition_date.
+        date_col = next(
+            (c for c in ["date_published", "Date Published"] if c in df.columns), None
+        )
+        if date_col:
+            stale = df[date_col].apply(lambda v: _published_date_is_stale(v, check_date))
             pct = stale.sum() / n * 100
-            checks.append(
-                {
-                    "check": f"quality:stale_date_pct:{sheet_name}",
-                    "pass": pct < 20.0,
-                    "detail": f"{pct:.1f}% stale (expected < 20% for {expected_date_str})",
-                }
-            )
-        elif "Date Published" in df.columns:
-            check_day = check_date.date() if isinstance(check_date, datetime) else check_date
-            window_start = (check_day - timedelta(days=1)).strftime("%d-%m-%Y")
-            window_end = check_day.strftime("%d-%m-%Y")
-            stale = df["Date Published"].apply(
-                lambda v: _office_date_is_stale(v, check_date)
-            )
-            pct = stale.sum() / n * 100
-            stale_threshold = sheet_schema.get("quality_thresholds", {}).get(
-                "stale_date_max_pct", 20.0
-            )
+            stale_threshold = thresholds.get("stale_date_max_pct", 20.0)
             checks.append(
                 {
                     "check": f"quality:stale_date_pct:{sheet_name}",
@@ -499,6 +538,11 @@ def main():
         print("ERROR: No excel_schema found in websites-config.yml — run the excel-schema prompt first.")
         sys.exit(1)
 
+    stats_key = f"{r2_prefix}/monitor/monitor_stats.yml"
+    persisted_stats = load_existing_stats(client, bucket, stats_key)
+    if persisted_stats:
+        print(f"  Stats loaded   ← r2://{bucket}/{stats_key}")
+
     # Date range
     if args.date:
         end_date = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -564,7 +608,13 @@ def main():
                     raw = download_object(client, bucket, key)
                     wb = openpyxl.load_workbook(BytesIO(raw), read_only=True)
 
-                    checks = validate_file(wb, schema_entry, file_size)
+                    checks = validate_file(
+                        wb,
+                        schema_entry,
+                        file_size,
+                        scraper_name=scraper_name,
+                        persisted_stats=persisted_stats,
+                    )
                     if args.quality:
                         checks += quality_checks(wb, schema_entry, check_date)
 
@@ -652,9 +702,7 @@ def main():
 
     # Update persisted stats (only with --update-stats)
     if args.update_stats:
-        stats_key = f"{r2_prefix}/monitor/monitor_stats.yml"
-        existing = load_existing_stats(client, bucket, stats_key)
-        updated = merge_stats(existing, new_stats_obs)
+        updated = merge_stats(persisted_stats, new_stats_obs)
         upload_bytes(
             client, bucket, stats_key,
             yaml.dump(updated, allow_unicode=True, default_flow_style=False).encode("utf-8"),
