@@ -171,18 +171,19 @@ def upload_bytes(
 
 
 def json_safe(value):
-    """Recursively convert numpy/pandas scalars to native Python types for JSON."""
+    """Recursively convert numpy/pandas scalars to native Python types for JSON.
+
+    numpy scalars (.item() exists) are converted FIRST so that numpy.bool_,
+    numpy.int64, numpy.float64, etc. are always reduced to their Python
+    equivalents before the isinstance guards run — regardless of numpy version.
+    """
+    if hasattr(value, "item"):          # numpy / pandas scalar → Python native
+        return json_safe(value.item())
     if isinstance(value, dict):
         return {k: json_safe(v) for k, v in value.items()}
     if isinstance(value, list):
         return [json_safe(v) for v in value]
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float, str)) or value is None:
-        return value
-    if hasattr(value, "item"):
-        return json_safe(value.item())
-    return value
+    return value                         # str, int, float, bool, None — safe
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -225,8 +226,10 @@ def validate_file(wb: openpyxl.Workbook, schema_entry: dict, file_size_bytes: in
         first_row = next(ws.iter_rows(min_row=1, max_row=1), [])
         actual_cols = [cell.value for cell in first_row if cell.value is not None]
 
-        # Row count (data rows only, header excluded)
-        row_count = max(0, ws.max_row - 1)
+        # Row count (data rows only, header excluded).
+        # ws.max_row is None in openpyxl read-only mode when the sheet is
+        # completely empty (e.g. offices with zero listings from yesterday).
+        row_count = max(0, (ws.max_row or 1) - 1)
 
         optional_cols = sheet_schema.get("optional_columns", [])
         cols_to_check = list(required_cols)
@@ -307,7 +310,8 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
                 }
             )
 
-        # Stale date % (date_published not from the partition date being checked)
+        # Stale date % — properties use "date_published" (ISO, YYYY-MM-DD prefix);
+        # offices use "Date Published" (DD-MM-YYYY exact match from format_date()).
         if "date_published" in df.columns:
             stale = df["date_published"].apply(
                 lambda v: bool(v) and not str(v).startswith(expected_date_str)
@@ -318,6 +322,19 @@ def quality_checks(wb: openpyxl.Workbook, schema_entry: dict, check_date: dateti
                     "check": f"quality:stale_date_pct:{sheet_name}",
                     "pass": pct < 20.0,
                     "detail": f"{pct:.1f}% stale (expected < 20% for {expected_date_str})",
+                }
+            )
+        elif "Date Published" in df.columns:
+            expected_ddmmyyyy = check_date.strftime("%d-%m-%Y")
+            stale = df["Date Published"].apply(
+                lambda v: bool(v) and str(v) != expected_ddmmyyyy
+            )
+            pct = stale.sum() / n * 100
+            checks.append(
+                {
+                    "check": f"quality:stale_date_pct:{sheet_name}",
+                    "pass": pct < 20.0,
+                    "detail": f"{pct:.1f}% stale (expected < 20% for {expected_ddmmyyyy})",
                 }
             )
 
@@ -530,7 +547,7 @@ def main():
                     # Collect stats observations per sheet
                     for sheet_name in wb.sheetnames:
                         ws = wb[sheet_name]
-                        row_count = max(0, ws.max_row - 1)
+                        row_count = max(0, (ws.max_row or 1) - 1)
                         first_row_iter = ws.iter_rows(min_row=1, max_row=1)
                         cols = [c.value for c in next(first_row_iter, []) if c.value]
                         if sheet_name not in obs_sheets:
