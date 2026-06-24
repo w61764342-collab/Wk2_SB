@@ -125,6 +125,27 @@ class MainS3Scraper:
                 print(f"  - {category}: {r2_uri}")
         else:
             print("\nERROR: Failed to upload Excel files to R2.")
+
+        subcategories = []
+        total_listings = 0
+        for category_name, category_data in self.category_scraper.last_scraped_data.items():
+            for subcat_name, items in category_data.items():
+                count = len(items)
+                total_listings += count
+                subcategories.append(
+                    {
+                        "name": f"{category_name}/{subcat_name}",
+                        "slug": subcat_name,
+                        "listings_count": count,
+                    }
+                )
+        summary = {
+            "scraped_at": datetime.now().isoformat(timespec="seconds"),
+            "saved_to_s3_date": datetime.now().strftime("%Y-%m-%d"),
+            "total_listings": total_listings,
+            "subcategories": subcategories,
+        }
+        self.s3_uploader.upload_json_summary(summary)
         
         # Summary
         print("\n" + "="*80)

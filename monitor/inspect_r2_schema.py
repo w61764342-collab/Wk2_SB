@@ -49,6 +49,9 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from ads_counter import count_scraper_ads
+
 import boto3
 import openpyxl
 import yaml
@@ -485,14 +488,18 @@ def print_summary(report: dict):
     print(f"  Days lookback: {report['days_lookback']}")
     print(f"  Overall      : {'✓ PASS' if report['overall_pass'] else '✗ FAIL'}")
     print("=" * 72)
-    print(f"  {'Scraper':<32} {'Files':>5}  {'Checks':>12}  {'Status':>6}")
-    print("  " + "-" * 68)
+    print(f"  {'Scraper':<32} {'Files':>5}  {'Ads':>6}  {'Checks':>12}  {'Status':>6}")
+    print("  " + "-" * 76)
     for entry in report["scrapers"]:
         status = "PASS" if entry["all_passed"] else "FAIL"
         print(
             f"  {entry['scraper']:<32} {entry['files_found']:>5}  "
+            f"{entry.get('unique_ads', 0):>6}  "
             f"{entry['checks_passed']:>5}/{entry['checks_total']:<5}  {status:>6}"
         )
+    if "total_unique_ads" in report:
+        print("  " + "-" * 76)
+        print(f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {report['total_unique_ads']:>6}")
     print("=" * 72 + "\n")
 
 
@@ -504,13 +511,18 @@ def write_step_summary(report: dict):
         fh.write("## R2 Schema Monitor — boshamlan.com\n\n")
         fh.write(f"**Date:** `{report['date']}`  \n")
         fh.write(f"**Overall:** {'✅ PASS' if report['overall_pass'] else '❌ FAIL'}\n\n")
-        fh.write("| Scraper | Files | Checks | Status |\n")
-        fh.write("|---------|------:|-------:|:------:|\n")
+        fh.write("| Scraper | Files | Unique ads | Checks | Status |\n")
+        fh.write("|---------|------:|-----------:|-------:|:------:|\n")
         for entry in report["scrapers"]:
             icon = "✅" if entry["all_passed"] else "❌"
             fh.write(
                 f"| {entry['scraper']} | {entry['files_found']} | "
+                f"{entry.get('unique_ads', 0)} | "
                 f"{entry['checks_passed']}/{entry['checks_total']} | {icon} |\n"
+            )
+        if "total_unique_ads" in report:
+            fh.write(
+                f"| **Total** | | **{report['total_unique_ads']}** | | |\n"
             )
         fh.write("\n")
 
@@ -597,6 +609,7 @@ def main():
                 "files": [],
             }
             obs_sheets: dict = {}
+            excel_downloads: list[tuple[str, bytes]] = []
 
             for obj in target_objects:
                 key = obj["Key"]
@@ -606,6 +619,7 @@ def main():
 
                 try:
                     raw = download_object(client, bucket, key)
+                    excel_downloads.append((key, raw))
                     wb = openpyxl.load_workbook(BytesIO(raw), read_only=True)
 
                     checks = validate_file(
@@ -670,6 +684,17 @@ def main():
                 scraper_result["all_passed"] = False
                 print(f"    WARNING: no files found for '{scraper_name}' on {date_str}")
 
+            ads_stats = count_scraper_ads(
+                client, bucket, base_path, check_date, excel_downloads
+            )
+            scraper_result["unique_ads"] = ads_stats.get("unique_ads") or 0
+            scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
+            scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
+            print(
+                f"    ads    : {scraper_result['unique_ads']} unique "
+                f"({scraper_result['ads_source']})"
+            )
+
             status_str = "PASS" if scraper_result["all_passed"] else "FAIL"
             print(
                 f"    result : {status_str} "
@@ -680,11 +705,17 @@ def main():
             new_stats_obs[scraper_name] = {"files_found": files_found, "sheets": obs_sheets}
 
     # Build report
+    report_date = end_date.strftime("%Y-%m-%d")
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "date": end_date.strftime("%Y-%m-%d"),
+        "date": report_date,
         "days_lookback": args.days_lookback,
         "overall_pass": not any_failure,
+        "total_unique_ads": sum(
+            r.get("unique_ads") or 0
+            for r in all_results
+            if r.get("date") == report_date
+        ),
         "scrapers": all_results,
     }
 

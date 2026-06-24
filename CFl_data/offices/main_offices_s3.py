@@ -144,7 +144,10 @@ class OfficeDataPipeline:
         main_data = []
         for listing in listings:
             date_published = listing.get('datePublished', '')
+            listing_url = listing.get('url', '')
+            listing_id = listing_url.rstrip('/').split('/')[-1] if listing_url else ''
             main_data.append({
+                'id': listing_id,
                 'Name': listing.get('name', ''),
                 'URL': listing.get('url', ''),
                 'Description': listing.get('description', ''),
@@ -272,6 +275,21 @@ class OfficeDataPipeline:
             uploaded_urls = self.s3_uploader.upload_multiple_files(excel_files)
             
             print(f"\n\u2713 Uploaded {len(uploaded_urls)} files to R2")
+
+            summary = {
+                "scraped_at": datetime.now().isoformat(timespec="seconds"),
+                "saved_to_s3_date": datetime.now().strftime("%Y-%m-%d"),
+                "total_listings": total_listings,
+                "subcategories": [
+                    {
+                        "name": office.get("name", "Unknown"),
+                        "slug": self._clean_filename(office.get("name", "unknown")),
+                        "listings_count": len(office.get("listings", [])),
+                    }
+                    for office in offices_data
+                ],
+            }
+            self.s3_uploader.upload_json_summary(summary)
         else:
             print("\n\u26a0 Skipping R2 upload")
         

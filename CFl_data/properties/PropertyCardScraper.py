@@ -110,6 +110,7 @@ class PropertyCardScraper:
                             date_published = await self.scrape_datetime(post)
                             
                             card_data = {
+                                'id': post_id,
                                 'title': api_data.get('title_ar'),
                                 'price': str(api_data.get('price', '')) if api_data.get('price') else None,
                                 'relative_date': await self.scrape_text(post, 'time span'),  # Still from HTML
@@ -135,6 +136,7 @@ class PropertyCardScraper:
                             title = await self.scrape_text(post, 'h2') or await self.scrape_text(post, 'h3') or await self.scrape_text(post, 'p.font-bold')
 
                             card_data = {
+                                'id': post_id,
                                 'title': title,
                                 'price': price,
                                 'relative_date': relative_date,

@@ -186,7 +186,7 @@ class CategoryScraper:
                         print(f"Added sheet '{sheet_name}' with {len(df)} rows")
                     else:
                         # Create an empty sheet with headers
-                        df = pd.DataFrame(columns=['title', 'price', 'relative_date', 'description', 
+                        df = pd.DataFrame(columns=['id', 'title', 'price', 'relative_date', 'description',
                                                   'image_url', 'link', 'mobile_number', 'views_number', 'image_r2_path'])
                         sheet_name = subcat_name[:31]
                         df.to_excel(writer, sheet_name=sheet_name, index=False)

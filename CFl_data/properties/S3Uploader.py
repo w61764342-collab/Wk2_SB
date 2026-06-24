@@ -1,5 +1,6 @@
 import boto3
 from botocore.config import Config
+import json
 import os
 from datetime import datetime, timedelta
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -171,6 +172,33 @@ class S3Uploader:
         print(f"{'='*60}")
         
         return results
+
+    def upload_json_summary(self, summary: dict, filename: str | None = None):
+        """
+        Upload a daily JSON summary for the monitor hub ad counter.
+
+        Path: {base_path}/year=YYYY/month=MM/day=DD/json-files/{filename}
+        """
+        now = datetime.now()
+        date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
+        if filename is None:
+            filename = f"summary_{now.strftime('%Y%m%d')}.json"
+        s3_key = f"{self.base_path}/{date_partition}/json-files/{filename}"
+
+        body = json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8")
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=body,
+                ContentType="application/json",
+            )
+            s3_uri = f"r2://{self.bucket_name}/{s3_key}"
+            print(f"✓ Uploaded JSON summary to {s3_uri}")
+            return s3_uri
+        except ClientError as e:
+            print(f"ERROR: Failed to upload JSON summary: {e}")
+            return None
     
     def check_bucket_exists(self):
         """
