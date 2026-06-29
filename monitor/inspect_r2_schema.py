@@ -51,7 +51,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ads_counter import count_scraper_ads
-from r2_file_counter import count_scraper_r2_files, count_site_r2_files
+from r2_file_counter import (
+    category_slug_from_excel_pattern,
+    count_scraper_r2_files,
+    count_site_r2_files,
+)
 
 import boto3
 import openpyxl
@@ -575,7 +579,7 @@ def main():
     all_results: list = []
     new_stats_obs: dict = {}
     any_failure = False
-    scraper_r2_counts: dict[str, int] = {}
+    scraper_r2_counts: dict[tuple[str, str | None], int] = {}
 
     for check_date in dates:
         date_str = check_date.strftime("%Y-%m-%d")
@@ -587,15 +591,22 @@ def main():
             scraper_conf = scrapers_conf.get(scraper_name, {})
             r2_path_raw = scraper_conf.get("r2_path", "")
             base_path = resolve_base_path(r2_path_raw)
-            if scraper_name not in scraper_r2_counts:
-                print(f"    r2 inventory: counting objects under {base_path}/ ...")
-                scraper_r2_counts[scraper_name] = count_scraper_r2_files(
-                    client, bucket, base_path
+            pattern = schema_entry.get("excel_file_pattern", "")
+            category_slug = category_slug_from_excel_pattern(pattern)
+            r2_count_key = (base_path, category_slug)
+            if r2_count_key not in scraper_r2_counts:
+                if category_slug:
+                    print(
+                        f"    r2 inventory: counting {category_slug} under {base_path}/ ..."
+                    )
+                else:
+                    print(f"    r2 inventory: counting objects under {base_path}/ ...")
+                scraper_r2_counts[r2_count_key] = count_scraper_r2_files(
+                    client, bucket, base_path, category_slug
                 )
-                print(f"    r2_file_count: {scraper_r2_counts[scraper_name]:,}")
+                print(f"    r2_file_count: {scraper_r2_counts[r2_count_key]:,}")
             partition = date_partition(check_date)
             prefix = f"{base_path}/{partition}/{EXCEL_FOLDER}/"
-            pattern = schema_entry.get("excel_file_pattern", "")
             is_wildcard = "{" in pattern
 
             print(f"\n  [{scraper_name}]")
@@ -619,7 +630,7 @@ def main():
                 "scraper": scraper_name,
                 "date": date_str,
                 "files_found": files_found,
-                "r2_file_count": scraper_r2_counts[scraper_name],
+                "r2_file_count": scraper_r2_counts[r2_count_key],
                 "checks_passed": 0,
                 "checks_total": 0,
                 "all_passed": True,
