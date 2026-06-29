@@ -51,6 +51,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ads_counter import count_scraper_ads
+from r2_file_counter import count_scraper_r2_files, count_site_r2_files
 
 import boto3
 import openpyxl
@@ -488,18 +489,25 @@ def print_summary(report: dict):
     print(f"  Days lookback: {report['days_lookback']}")
     print(f"  Overall      : {'✓ PASS' if report['overall_pass'] else '✗ FAIL'}")
     print("=" * 72)
-    print(f"  {'Scraper':<32} {'Files':>5}  {'Ads':>6}  {'Checks':>12}  {'Status':>6}")
-    print("  " + "-" * 76)
+    print(
+        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'Ads':>6}  "
+        f"{'Checks':>12}  {'Status':>6}"
+    )
+    print("  " + "-" * 84)
     for entry in report["scrapers"]:
         status = "PASS" if entry["all_passed"] else "FAIL"
         print(
             f"  {entry['scraper']:<32} {entry['files_found']:>5}  "
+            f"{entry.get('r2_file_count', 0):>7}  "
             f"{entry.get('unique_ads', 0):>6}  "
             f"{entry['checks_passed']:>5}/{entry['checks_total']:<5}  {status:>6}"
         )
-    if "total_unique_ads" in report:
-        print("  " + "-" * 76)
-        print(f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {report['total_unique_ads']:>6}")
+    if "total_unique_ads" in report or "total_r2_files" in report:
+        print("  " + "-" * 84)
+        if "total_unique_ads" in report:
+            print(f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {'':>7}  {report['total_unique_ads']:>6}")
+        if "total_r2_files" in report:
+            print(f"  {'TOTAL R2 FILES':<32} {'':>5}  {report['total_r2_files']:>7}")
     print("=" * 72 + "\n")
 
 
@@ -511,19 +519,20 @@ def write_step_summary(report: dict):
         fh.write("## R2 Schema Monitor — boshamlan.com\n\n")
         fh.write(f"**Date:** `{report['date']}`  \n")
         fh.write(f"**Overall:** {'✅ PASS' if report['overall_pass'] else '❌ FAIL'}\n\n")
-        fh.write("| Scraper | Files | Unique ads | Checks | Status |\n")
-        fh.write("|---------|------:|-----------:|-------:|:------:|\n")
+        fh.write("| Scraper | Files | R2 files | Unique ads | Checks | Status |\n")
+        fh.write("|---------|------:|---------:|-----------:|-------:|:------:|\n")
         for entry in report["scrapers"]:
             icon = "✅" if entry["all_passed"] else "❌"
             fh.write(
                 f"| {entry['scraper']} | {entry['files_found']} | "
+                f"{entry.get('r2_file_count', 0)} | "
                 f"{entry.get('unique_ads', 0)} | "
                 f"{entry['checks_passed']}/{entry['checks_total']} | {icon} |\n"
             )
-        if "total_unique_ads" in report:
-            fh.write(
-                f"| **Total** | | **{report['total_unique_ads']}** | | |\n"
-            )
+        if "total_unique_ads" in report or "total_r2_files" in report:
+            ads_total = report.get("total_unique_ads", "")
+            r2_total = report.get("total_r2_files", "")
+            fh.write(f"| **Total** | | **{r2_total}** | **{ads_total}** | | |\n")
         fh.write("\n")
 
 
@@ -566,6 +575,7 @@ def main():
     all_results: list = []
     new_stats_obs: dict = {}
     any_failure = False
+    scraper_r2_counts: dict[str, int] = {}
 
     for check_date in dates:
         date_str = check_date.strftime("%Y-%m-%d")
@@ -577,6 +587,12 @@ def main():
             scraper_conf = scrapers_conf.get(scraper_name, {})
             r2_path_raw = scraper_conf.get("r2_path", "")
             base_path = resolve_base_path(r2_path_raw)
+            if scraper_name not in scraper_r2_counts:
+                print(f"    r2 inventory: counting objects under {base_path}/ ...")
+                scraper_r2_counts[scraper_name] = count_scraper_r2_files(
+                    client, bucket, base_path
+                )
+                print(f"    r2_file_count: {scraper_r2_counts[scraper_name]:,}")
             partition = date_partition(check_date)
             prefix = f"{base_path}/{partition}/{EXCEL_FOLDER}/"
             pattern = schema_entry.get("excel_file_pattern", "")
@@ -603,6 +619,7 @@ def main():
                 "scraper": scraper_name,
                 "date": date_str,
                 "files_found": files_found,
+                "r2_file_count": scraper_r2_counts[scraper_name],
                 "checks_passed": 0,
                 "checks_total": 0,
                 "all_passed": True,
@@ -706,6 +723,15 @@ def main():
 
     # Build report
     report_date = end_date.strftime("%Y-%m-%d")
+    site_r2_prefix = meta.get("r2_prefix", r2_prefix).strip("/")
+    if site_r2_prefix:
+        print(f"\n  Site R2 inventory: counting objects under {site_r2_prefix}/ ...")
+        total_r2_files = count_site_r2_files(client, bucket, site_r2_prefix)
+        print(f"  total_r2_files: {total_r2_files:,}")
+    else:
+        report_scrapers = [r for r in all_results if r.get("date") == report_date]
+        total_r2_files = sum(r.get("r2_file_count") or 0 for r in report_scrapers)
+
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "date": report_date,
@@ -716,6 +742,7 @@ def main():
             for r in all_results
             if r.get("date") == report_date
         ),
+        "total_r2_files": total_r2_files,
         "scrapers": all_results,
     }
 
