@@ -2,6 +2,11 @@ name: Count R2 Files
 
 on:
   workflow_dispatch:
+    inputs:
+      folder:
+        description: "Folder to count (leave empty to count all folders)"
+        required: false
+        type: string
 
 jobs:
   count:
@@ -20,7 +25,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install boto3
+      - name: Install dependencies
+        run: pip install boto3
 
       - name: Count files
-        run: python count_r2_files.py
+        run: |
+          if [ -n "${{ github.event.inputs.folder }}" ]; then
+            python count_r2_files.py --folder "${{ github.event.inputs.folder }}"
+          else
+            python count_r2_files.py
+          fi
