@@ -1,5 +1,9 @@
 name: R2 Schema Monitor
 
+permissions:
+  contents: read
+  actions: read
+
 on:
   # ── Primary trigger: run automatically after daily_r2.yml finishes ─────────
   workflow_run:
@@ -8,7 +12,6 @@ on:
 
   # ── Fallback cron: catches any day the workflow_run event is missed ─────────
   schedule:
-    - cron: '0 8 * * 1-6'   # Mon–Sat — daily validation (checks yesterday)
     - cron: '0 9 * * 0'     # Sunday  — weekly stats refresh (7-day lookback)
 
   workflow_dispatch:

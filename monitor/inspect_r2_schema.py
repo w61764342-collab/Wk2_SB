@@ -51,6 +51,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ads_counter import count_scraper_ads
+from github_workflows import build_scraper_run_meta, load_site_run_meta
 from r2_file_counter import (
     category_slug_from_excel_pattern,
     count_scraper_r2_files,
@@ -543,6 +544,7 @@ def write_step_summary(report: dict):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     args = parse_args()
+    run_started_at = datetime.now(timezone.utc)
 
     # Bootstrap R2 client before config (config lives in R2, not in the repo)
     r2_prefix = os.environ.get("MONITOR_R2_PREFIX", DEFAULT_R2_PREFIX)
@@ -590,6 +592,10 @@ def main():
         for scraper_name, schema_entry in schema_map.items():
             scraper_conf = scrapers_conf.get(scraper_name, {})
             r2_path_raw = scraper_conf.get("r2_path", "")
+            allow_no_files = bool(
+                schema_entry.get("allow_no_files", False)
+                or scraper_conf.get("allow_no_files", False)
+            )
             base_path = resolve_base_path(r2_path_raw)
             pattern = schema_entry.get("excel_file_pattern", "")
             category_slug = category_slug_from_excel_pattern(pattern)
@@ -706,11 +712,17 @@ def main():
                         {"key": key, "size_bytes": file_size, "error": str(exc), "all_passed": False}
                     )
 
-            # No files found — count as a failure for properties; warn for offices
+            # No files found: optionally allow per scraper (e.g. low-volume categories).
             if files_found == 0:
-                any_failure = True
-                scraper_result["all_passed"] = False
-                print(f"    WARNING: no files found for '{scraper_name}' on {date_str}")
+                if allow_no_files:
+                    print(
+                        f"    INFO   : no files found for '{scraper_name}' on {date_str} "
+                        f"(allowed by config)"
+                    )
+                else:
+                    any_failure = True
+                    scraper_result["all_passed"] = False
+                    print(f"    WARNING: no files found for '{scraper_name}' on {date_str}")
 
             ads_stats = count_scraper_ads(
                 client, bucket, base_path, check_date, excel_downloads
@@ -756,6 +768,15 @@ def main():
         "total_r2_files": total_r2_files,
         "scrapers": all_results,
     }
+
+    site_meta = load_site_run_meta()
+    report["github_run"] = build_scraper_run_meta(
+        site_meta,
+        report_date,
+        run_started_at.replace(tzinfo=None),
+        not any_failure,
+    )
+    report["run_place"] = report["github_run"].get("run_place")
 
     print_summary(report)
     write_step_summary(report)
