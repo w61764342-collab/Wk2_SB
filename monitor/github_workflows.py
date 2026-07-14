@@ -66,15 +66,27 @@ def _resolve_workflow_display_name(workflow_path: Path) -> Optional[str]:
 def load_site_run_meta(
     site_id: Optional[str] = None,
     monitor_sites_dir: Optional[Union[str, Path]] = None,
+    r2_client=None,
+    bucket: Optional[str] = None,
+    r2_prefix: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Load site metadata from:
-    
-    R2:
-        {r2_prefix}/monitor-sites/{site_id}/site.yml
+    Load site/workflow metadata.
 
-    fallback:
-        local monitor-sites/{site_id}/site.yml
+    Priority:
+    1. R2:
+       {r2_prefix}/monitor-sites/{site_id}/site.yml
+
+    2. Local fallback:
+       monitor-sites/{site_id}/site.yml
+
+    site.yml is the source of truth for:
+    - github_username
+    - repo
+    - schedule
+    - workflows
+    - workflow_name
+    - run_place
     """
 
     site_id = (
@@ -83,65 +95,37 @@ def load_site_run_meta(
         or "boshamlan"
     ).strip()
 
-    r2_prefix = os.environ.get(
-        "MONITOR_R2_PREFIX",
-        "boshamlan-data"
-    )
-
-    bucket = os.environ.get("CF_R2_BUCKET_NAME")
-
     cfg = {}
 
-    # -----------------------------
-    # 1. Try Cloudflare R2
-    # -----------------------------
-    if bucket:
+    # ---------------------------------------------------------
+    # First: load from R2
+    # ---------------------------------------------------------
+    if r2_client and bucket:
+        prefix = (r2_prefix or "boshamlan-data").strip("/")
+        key = f"{prefix}/monitor-sites/{site_id}/site.yml"
+
         try:
-            import boto3
-            from botocore.config import Config
-
-            client = boto3.client(
-                "s3",
-                endpoint_url=os.environ["CF_R2_ENDPOINT_URL"],
-                aws_access_key_id=os.environ["CF_R2_ACCESS_KEY_ID"],
-                aws_secret_access_key=os.environ["CF_R2_SECRET_ACCESS_KEY"],
-                region_name="us-east-1",
-                config=Config(
-                    signature_version="s3v4",
-                    s3={"addressing_style": "path"},
-                ),
-            )
-
-            key = (
-                f"{r2_prefix}/"
-                f"monitor-sites/"
-                f"{site_id}/site.yml"
-            )
-
-            response = client.get_object(
+            obj = r2_client.get_object(
                 Bucket=bucket,
                 Key=key,
             )
 
-            cfg = yaml.safe_load(
-                response["Body"].read()
-            ) or {}
+            data = obj["Body"].read().decode("utf-8")
+            cfg = yaml.safe_load(data) or {}
 
             log.info(
-                f"Loaded site metadata from R2: {key}"
+                f"Loaded site metadata from R2: r2://{bucket}/{key}"
             )
 
         except Exception as exc:
             log.warning(
-                f"R2 site metadata lookup failed: {exc}"
+                f"Could not load R2 site metadata {key}: {exc}"
             )
 
-
-    # -----------------------------
-    # 2. Local fallback
-    # -----------------------------
+    # ---------------------------------------------------------
+    # Second: local fallback
+    # ---------------------------------------------------------
     if not cfg:
-
         repo_root = Path(__file__).resolve().parent.parent
 
         base_dir = (
@@ -154,10 +138,10 @@ def load_site_run_meta(
 
         if site_path.is_file():
             cfg = _load_yaml_file(site_path)
+
             log.info(
                 f"Loaded site metadata locally: {site_path}"
             )
-
 
     if not cfg:
         log.warning(
@@ -165,14 +149,17 @@ def load_site_run_meta(
         )
         return {}
 
-
-    # -----------------------------
+    # ---------------------------------------------------------
     # Normalize
-    # -----------------------------
-    site = {}
+    # ---------------------------------------------------------
+    site: Dict[str, Any] = {}
 
     site["site_id"] = str(
         cfg.get("site_id") or site_id
+    ).strip()
+
+    site["folder"] = str(
+        cfg.get("folder") or site_id
     ).strip()
 
     site["github_username"] = str(
@@ -189,22 +176,32 @@ def load_site_run_meta(
         cfg.get("run_place") or "github"
     ).strip().lower()
 
-
     for key in (
         "schedule",
         "workflow_name",
+        "workflows",
+        "uses_proxy",
+        "r2_prefix",
     ):
-        if cfg.get(key):
-            site[key] = str(cfg[key]).strip()
+        if key in cfg:
+            site[key] = cfg[key]
 
+    # GitHub environment fallback
+    if not site["github_username"] or not site["repo"]:
+        gh_repo = str(
+            os.environ.get("GITHUB_REPOSITORY") or ""
+        ).strip()
 
-    if cfg.get("workflows"):
-        site["workflows"] = cfg["workflows"]
+        if "/" in gh_repo:
+            owner, repo = gh_repo.split("/", 1)
 
+            site["github_username"] = (
+                site["github_username"] or owner
+            )
 
-    if cfg.get("uses_proxy") is not None:
-        site["uses_proxy"] = cfg["uses_proxy"]
-
+            site["repo"] = (
+                site["repo"] or repo
+            )
 
     log.info(
         f"Final site metadata: {site}"
