@@ -772,7 +772,7 @@ def main():
     site_meta = load_site_run_meta(
         site_id=meta.get("site_id") or "boshamlan",
         r2_client=client,
-        r2_bucket=bucket,
+        bucket=bucket,
         r2_prefix="data-collection-dl",
         )
     print("=" * 80)
