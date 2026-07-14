@@ -101,8 +101,12 @@ def load_site_run_meta(
     # First: load from R2
     # ---------------------------------------------------------
     if r2_client and bucket:
-        prefix = (r2_prefix or "boshamlan-data").strip("/")
-        key = f"{prefix}/monitor-sites/{site_id}/site.yml"
+        prefix = (r2_prefix or "").strip("/")
+
+        if prefix:
+         key = f"{prefix}/monitor-sites/{site_id}/site.yml"
+        else:
+         key = f"monitor-sites/{site_id}/site.yml"
 
         try:
             obj = r2_client.get_object(
