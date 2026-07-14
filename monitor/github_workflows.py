@@ -63,69 +63,114 @@ def _resolve_workflow_display_name(workflow_path: Path) -> Optional[str]:
     return str(name).strip() or None
 
 
-def load_site_run_meta(config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
-    """Load site/workflow metadata used to enrich monitor reports.
-
-    Backward-compatible helper used by inspect_r2_schema.py.
-    Prefers websites-config.yml and derives scraper workflow display names from
-    .github/workflows/*.yml when explicit workflow metadata is not present.
+def load_site_run_meta(
+    site_id: Optional[str] = None,
+    monitor_sites_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
     """
+    Load site/workflow metadata from monitor-sites/{site_id}/site.yml.
+
+    Example:
+        data-collection-dl/
+        └── monitor-sites/
+            └── boshamlan/
+                └── site.yml
+
+    The site.yml file is the source of truth for:
+    - github_username
+    - repo
+    - schedule
+    - workflows
+    - workflow_name
+    - run_place
+    """
+
     repo_root = Path(__file__).resolve().parent.parent
-    if config_path:
-        cfg_path = Path(config_path)
-    else:
-        cfg_path = repo_root / "websites-config.yml"
 
-    cfg = _load_yaml_file(cfg_path)
-    meta = cfg.get("meta", {}) if isinstance(cfg.get("meta", {}), dict) else {}
+    # Default site folder
+    site_id = (
+        site_id
+        or os.environ.get("MONITOR_SITE_ID")
+        or "boshamlan"
+    ).strip()
 
+    # Default location:
+    # repo_root/monitor-sites/boshamlan/site.yml
+    base_dir = (
+        Path(monitor_sites_dir)
+        if monitor_sites_dir
+        else repo_root / "monitor-sites"
+    )
+
+    site_path = base_dir / site_id / "site.yml"
+
+    if not site_path.is_file():
+        log.warning(f"Site metadata not found: {site_path}")
+        return {}
+
+    cfg = _load_yaml_file(site_path)
+
+    if not cfg:
+        return {}
+
+    # Normalize site metadata
     site: Dict[str, Any] = {}
-    site["site_id"] = str(meta.get("website") or "").strip() or None
-    site["github_username"] = str(meta.get("github_username") or "").strip()
-    site["repo"] = str(meta.get("repo") or "").strip()
-    site["run_place"] = str(meta.get("run_place") or "github").strip().lower()
-    if meta.get("workflow_name"):
-        site["workflow_name"] = str(meta.get("workflow_name")).strip()
-    if meta.get("schedule"):
-        site["schedule"] = str(meta.get("schedule")).strip()
 
+    site["site_id"] = str(
+        cfg.get("site_id")
+        or site_id
+    ).strip()
+
+    site["github_username"] = str(
+        cfg.get("github_username")
+        or cfg.get("github_owner")
+        or ""
+    ).strip()
+
+    site["repo"] = str(
+        cfg.get("repo")
+        or ""
+    ).strip()
+
+    site["run_place"] = str(
+        cfg.get("run_place")
+        or "github"
+    ).strip().lower()
+
+    if cfg.get("schedule"):
+        site["schedule"] = str(cfg["schedule"]).strip()
+
+    if cfg.get("workflow_name"):
+        site["workflow_name"] = str(cfg["workflow_name"]).strip()
+
+    if cfg.get("workflows"):
+        site["workflows"] = cfg["workflows"]
+
+    if cfg.get("uses_proxy") is not None:
+        site["uses_proxy"] = cfg["uses_proxy"]
+
+    # Fallback to GitHub Actions environment
     if not site["github_username"] or not site["repo"]:
-        gh_repo = str(os.environ.get("GITHUB_REPOSITORY") or "").strip()
+        gh_repo = str(
+            os.environ.get("GITHUB_REPOSITORY") or ""
+        ).strip()
+
         if "/" in gh_repo:
             owner, repo = gh_repo.split("/", 1)
-            site["github_username"] = site["github_username"] or owner
-            site["repo"] = site["repo"] or repo
 
-    workflows = meta.get("workflows")
-    if workflows:
-        site["workflows"] = workflows
-        return site
+            site["github_username"] = (
+                site["github_username"] or owner
+            )
 
-    owner = site.get("github_username") or ""
-    repo = site.get("repo") or ""
-    entries: List[Dict[str, str]] = []
-    workflow_files = {
-        str(s.get("workflow_file") or "").strip()
-        for s in cfg.get("scrapers", [])
-        if isinstance(s, dict)
-    }
-    workflow_files = {wf for wf in workflow_files if wf}
+            site["repo"] = (
+                site["repo"] or repo
+            )
 
-    for wf_file in sorted(workflow_files):
-        wf_path = repo_root / ".github" / "workflows" / wf_file
-        wf_name = _resolve_workflow_display_name(wf_path)
-        if not wf_name or is_monitor_workflow(wf_name):
-            continue
-        if owner and repo:
-            entries.append({"name": wf_name, "owner": owner, "repo": repo})
-        else:
-            entries.append({"name": wf_name})
-
-    if entries:
-        site["workflows"] = entries
+    log.info(
+        f"Loaded site metadata from {site_path}: {site}"
+    )
 
     return site
-
 
 def is_monitor_workflow(name: Optional[str]) -> bool:
     if not name:
