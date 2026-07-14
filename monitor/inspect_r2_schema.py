@@ -770,6 +770,10 @@ def main():
     }
 
     site_meta = load_site_run_meta()
+    print("=" * 80)
+    print(site_meta)
+    print("=" * 80)
+
     report["github_run"] = build_scraper_run_meta(
         site_meta,
         report_date,
