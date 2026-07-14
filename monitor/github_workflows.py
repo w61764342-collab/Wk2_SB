@@ -66,9 +66,15 @@ def _resolve_workflow_display_name(workflow_path: Path) -> Optional[str]:
 def load_site_run_meta(
     site_id: Optional[str] = None,
     monitor_sites_dir: Optional[Union[str, Path]] = None,
+    r2_client=None,
+    r2_bucket: Optional[str] = None,
+    r2_prefix: str = "data-collection-dl",
 ) -> Dict[str, Any]:
     """
-    Load site/workflow metadata from monitor-sites/{site_id}/site.yml.
+    Load site/workflow metadata from:
+
+    R2:
+        {r2_prefix}/monitor-sites/{site_id}/site.yml
 
     Example:
         data-collection-dl/
@@ -76,7 +82,10 @@ def load_site_run_meta(
             └── boshamlan/
                 └── site.yml
 
-    The site.yml file is the source of truth for:
+    Falls back to local:
+        monitor-sites/{site_id}/site.yml
+
+    Source of truth:
     - github_username
     - repo
     - schedule
@@ -85,39 +94,49 @@ def load_site_run_meta(
     - run_place
     """
 
-    repo_root = Path(__file__).resolve().parent.parent
-
-    # Default site folder
     site_id = (
         site_id
         or os.environ.get("MONITOR_SITE_ID")
         or "boshamlan"
     ).strip()
 
-    # Default location:
-    # repo_root/monitor-sites/boshamlan/site.yml
-    base_dir = (
-        Path(monitor_sites_dir)
-        if monitor_sites_dir
-        else repo_root / "monitor-sites"
-    )
+    cfg = {}
 
-    site_path = base_dir / site_id / "site.yml"
+    # ---------------------------------------------------------
+    # 1. Try R2 first
+    # ---------------------------------------------------------
+    if r2_client and r2_bucket:
+        r2_key = f"{r2_prefix}/monitor-sites/{site_id}/site.yml"
 
-    if not site_path.is_file():
-        log.warning(f"Site metadata not found: {site_path}")
-        return {}
+        try:
+            response = r2_client.get_object(
+                Bucket=r2_bucket,
+                Key=r2_key,
+            )
 
-    cfg = _load_yaml_file(site_path)
+            cfg = yaml.safe_load(
+                response["Body"].read().decode("utf-8")
+            ) or {}
 
-    if not cfg:
-        return {}
+            log.info(
+                f"Loaded site metadata from r2://{r2_bucket}/{r2_key}"
+            )
 
-    # Normalize site metadata
+        except Exception as exc:
+            log.warning(
+                f"Could not load R2 site metadata "
+                f"r2://{r2_bucket}/{r2_key}: {exc}"
+            )
+
+
+    # ---------------------------------------------------------
+    # Normalize metadata
+    # ---------------------------------------------------------
     site: Dict[str, Any] = {}
 
     site["site_id"] = str(
         cfg.get("site_id")
+        or cfg.get("website")
         or site_id
     ).strip()
 
@@ -149,7 +168,9 @@ def load_site_run_meta(
     if cfg.get("uses_proxy") is not None:
         site["uses_proxy"] = cfg["uses_proxy"]
 
-    # Fallback to GitHub Actions environment
+    # ---------------------------------------------------------
+    # GitHub environment fallback
+    # ---------------------------------------------------------
     if not site["github_username"] or not site["repo"]:
         gh_repo = str(
             os.environ.get("GITHUB_REPOSITORY") or ""
@@ -167,7 +188,7 @@ def load_site_run_meta(
             )
 
     log.info(
-        f"Loaded site metadata from {site_path}: {site}"
+        f"Final site metadata: {site}"
     )
 
     return site

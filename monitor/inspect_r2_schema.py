@@ -65,9 +65,6 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-print('=' * 80)
-print(load_site_run_meta("boshamlan"))
-print('=' * 80)
 CONFIG_PATH = Path(__file__).parent.parent / "websites-config.yml"
 CONFIG_R2_SUFFIX = "monitor/websites-config.yml"
 DEFAULT_R2_PREFIX = "boshamlan-data"
@@ -772,7 +769,12 @@ def main():
         "scrapers": all_results,
     }
 
-    site_meta = load_site_run_meta("boshamlan")
+    site_meta = load_site_run_meta(
+        site_id=meta.get("site_id") or "boshamlan",
+        r2_client=client,
+        r2_bucket=bucket,
+        r2_prefix="data-collection-dl",
+        )
     print("=" * 80)
     print(site_meta)
     print("=" * 80)
