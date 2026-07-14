@@ -65,6 +65,9 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+print('=' * 80)
+print(load_site_run_meta())
+print('=' * 80)
 CONFIG_PATH = Path(__file__).parent.parent / "websites-config.yml"
 CONFIG_R2_SUFFIX = "monitor/websites-config.yml"
 DEFAULT_R2_PREFIX = "boshamlan-data"
