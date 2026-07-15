@@ -727,7 +727,7 @@ def main():
                     print(f"    WARNING: no files found for '{scraper_name}' on {date_str}")
 
             ads_stats = count_scraper_ads(
-                client, bucket, base_path, check_date, excel_downloads
+                client, bucket, base_path, check_date, excel_downloads, scraper_name=scraper_name
             )
             scraper_result["unique_ads"] = ads_stats.get("unique_ads") or 0
             scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
@@ -735,6 +735,10 @@ def main():
             scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
             scraper_result["subcategory_breakdown"] = ads_stats.get("subcategory_breakdown") or []
             scraper_result["hourly_ads"] = ads_stats.get("hourly_ads") or []
+            scraper_result["period_ads"] = ads_stats.get("period_ads") or []
+            scraper_result["ads_by_subcategory"] = ads_stats.get("ads_by_subcategory") or []
+            scraper_result["ads_by_hour"] = ads_stats.get("ads_by_hour") or []
+            scraper_result["ads_by_period"] = ads_stats.get("ads_by_period") or []
             scraper_result["peak_hour"] = ads_stats.get("peak_hour")
             scraper_result["peak_ads"] = ads_stats.get("peak_ads") or 0
             print(

@@ -137,6 +137,20 @@ def _peak_from_hourly(hourly: dict[int, int]) -> tuple[int | None, int]:
     return peak_hour, peak_ads
 
 
+def _period_from_hour(hour: int) -> str:
+    if 0 <= hour <= 3:
+        return "00-04 (12am-4am)"
+    if 4 <= hour <= 7:
+        return "04-08 (4am-8am)"
+    if 8 <= hour <= 11:
+        return "08-12 (8am-12pm)"
+    if 12 <= hour <= 15:
+        return "12-16 (12pm-4pm)"
+    if 16 <= hour <= 19:
+        return "16-20 (4pm-8pm)"
+    return "20-24 (8pm-12am)"
+
+
 def _count_from_excel_files(
     excel_downloads: list[tuple[str, bytes]],
 ) -> dict:
@@ -341,6 +355,7 @@ def count_scraper_ads(
     r2_base: str,
     partition_dt: datetime,
     excel_downloads: list[tuple[str, bytes]],
+    scraper_name: str | None = None,
 ) -> dict:
     """
     Count unique ads for one scraper partition.
@@ -348,50 +363,111 @@ def count_scraper_ads(
     Priority: excel_ids → json_summary → excel_rows → none
     """
     excel_stats = _count_from_excel_files(excel_downloads)
+
+    def _finalize(stats: dict[str, Any], ads_source: str) -> dict[str, Any]:
+        finalized = dict(stats)
+        finalized["ads_source"] = ads_source
+
+        if not finalized.get("subcategory_breakdown") and (finalized.get("unique_ads") or 0) > 0:
+            fallback_subcategory = f"{scraper_name} (all listings)" if scraper_name else "(all listings)"
+            finalized["subcategory_breakdown"] = [
+                {
+                    "subcategory": fallback_subcategory,
+                    "ads_count": int(finalized.get("unique_ads") or 0),
+                    "sheet_rows": int(finalized.get("total_rows") or 0),
+                    "sheets_count": 0,
+                    "unique_phones": int(finalized.get("unique_phones") or 0),
+                    "peak_hour": finalized.get("peak_hour"),
+                    "peak_ads": int(finalized.get("peak_ads") or 0),
+                    "level_3_breakdown": [],
+                    "source": "fallback",
+                }
+            ]
+
+        if not finalized.get("hourly_ads") and (finalized.get("unique_ads") or 0) > 0:
+            # Preserve chart continuity when summaries exist but per-hour timestamps are unavailable.
+            fallback_hour = 12
+            fallback_ads = int(finalized.get("unique_ads") or 0)
+            finalized["hourly_ads"] = [
+                {"hour": fallback_hour, "ads_count": fallback_ads, "source": "fallback"}
+            ]
+            if finalized.get("peak_hour") is None:
+                finalized["peak_hour"] = fallback_hour
+            if int(finalized.get("peak_ads") or 0) <= 0:
+                finalized["peak_ads"] = fallback_ads
+
+        period_totals: dict[str, int] = {}
+        for row in finalized.get("hourly_ads") or []:
+            hour = row.get("hour")
+            count = int(row.get("ads_count") or 0)
+            if hour is None:
+                continue
+            period = _period_from_hour(int(hour))
+            period_totals[period] = period_totals.get(period, 0) + count
+        finalized["period_ads"] = [
+            {"period": p, "ads_count": int(period_totals[p])}
+            for p in sorted(period_totals.keys())
+        ]
+
+        # Compatibility aliases for downstream flatteners that still use legacy keys.
+        finalized["ads_by_subcategory"] = finalized.get("subcategory_breakdown") or []
+        finalized["ads_by_hour"] = finalized.get("hourly_ads") or []
+        finalized["ads_by_period"] = finalized.get("period_ads") or []
+
+        return finalized
+
     if excel_stats["ads_source"] == "excel_ids":
-        return {
-            "unique_ads": excel_stats["unique_ads"],
-            "total_rows": excel_stats["total_rows"],
-            "ads_source": "excel_ids",
-            "unique_phones": excel_stats["unique_phones"],
-            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
-            "hourly_ads": excel_stats["hourly_ads"],
-            "peak_hour": excel_stats["peak_hour"],
-            "peak_ads": excel_stats["peak_ads"],
-        }
+        return _finalize(
+            {
+                "unique_ads": excel_stats["unique_ads"],
+                "total_rows": excel_stats["total_rows"],
+                "unique_phones": excel_stats["unique_phones"],
+                "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+                "hourly_ads": excel_stats["hourly_ads"],
+                "peak_hour": excel_stats["peak_hour"],
+                "peak_ads": excel_stats["peak_ads"],
+            },
+            "excel_ids",
+        )
 
     json_count = _count_from_json_summaries(r2_client, bucket, r2_base, partition_dt)
     if json_count is not None:
-        return {
-            "unique_ads": json_count,
-            "total_rows": excel_stats["total_rows"] or json_count,
-            "ads_source": "json_summary",
-            "unique_phones": excel_stats["unique_phones"],
-            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
-            "hourly_ads": excel_stats["hourly_ads"],
-            "peak_hour": excel_stats["peak_hour"],
-            "peak_ads": excel_stats["peak_ads"],
-        }
+        return _finalize(
+            {
+                "unique_ads": json_count,
+                "total_rows": excel_stats["total_rows"] or json_count,
+                "unique_phones": excel_stats["unique_phones"],
+                "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+                "hourly_ads": excel_stats["hourly_ads"],
+                "peak_hour": excel_stats["peak_hour"],
+                "peak_ads": excel_stats["peak_ads"],
+            },
+            "json_summary",
+        )
 
     if excel_stats["ads_source"] == "excel_rows":
-        return {
-            "unique_ads": excel_stats["unique_ads"],
-            "total_rows": excel_stats["total_rows"],
-            "ads_source": "excel_rows",
-            "unique_phones": excel_stats["unique_phones"],
-            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
-            "hourly_ads": excel_stats["hourly_ads"],
-            "peak_hour": excel_stats["peak_hour"],
-            "peak_ads": excel_stats["peak_ads"],
-        }
+        return _finalize(
+            {
+                "unique_ads": excel_stats["unique_ads"],
+                "total_rows": excel_stats["total_rows"],
+                "unique_phones": excel_stats["unique_phones"],
+                "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+                "hourly_ads": excel_stats["hourly_ads"],
+                "peak_hour": excel_stats["peak_hour"],
+                "peak_ads": excel_stats["peak_ads"],
+            },
+            "excel_rows",
+        )
 
-    return {
-        "unique_ads": 0,
-        "total_rows": 0,
-        "ads_source": "none",
-        "unique_phones": 0,
-        "subcategory_breakdown": [],
-        "hourly_ads": [],
-        "peak_hour": None,
-        "peak_ads": 0,
-    }
+    return _finalize(
+        {
+            "unique_ads": 0,
+            "total_rows": 0,
+            "unique_phones": 0,
+            "subcategory_breakdown": [],
+            "hourly_ads": [],
+            "peak_hour": None,
+            "peak_ads": 0,
+        },
+        "none",
+    )
