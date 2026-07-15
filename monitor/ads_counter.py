@@ -105,7 +105,21 @@ def _extract_hour(value: Any) -> int | None:
     if m:
         return int(m.group(1))
 
-    parsed = pd.to_datetime(text, errors="coerce")
+    # Try explicit known formats first to avoid parser warnings/noise.
+    for fmt in (
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d-%m-%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
+        parsed = pd.to_datetime(text, format=fmt, errors="coerce")
+        if not pd.isna(parsed):
+            return int(parsed.hour)
+
+    # Fallback for other parsable variants. dayfirst=True matches dd-mm-yyyy data.
+    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
     return int(parsed.hour)
