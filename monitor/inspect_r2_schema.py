@@ -495,7 +495,7 @@ def print_summary(report: dict):
     print(f"  Overall      : {'✓ PASS' if report['overall_pass'] else '✗ FAIL'}")
     print("=" * 72)
     print(
-        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'Ads':>6}  "
+        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'Ads':>6}  {'Phones':>7}  "
         f"{'Checks':>12}  {'Status':>6}"
     )
     print("  " + "-" * 84)
@@ -505,6 +505,7 @@ def print_summary(report: dict):
             f"  {entry['scraper']:<32} {entry['files_found']:>5}  "
             f"{entry.get('r2_file_count', 0):>7}  "
             f"{entry.get('unique_ads', 0):>6}  "
+            f"{entry.get('unique_phones', 0):>7}  "
             f"{entry['checks_passed']:>5}/{entry['checks_total']:<5}  {status:>6}"
         )
     if "total_unique_ads" in report or "total_r2_files" in report:
@@ -524,14 +525,15 @@ def write_step_summary(report: dict):
         fh.write("## R2 Schema Monitor — boshamlan.com\n\n")
         fh.write(f"**Date:** `{report['date']}`  \n")
         fh.write(f"**Overall:** {'✅ PASS' if report['overall_pass'] else '❌ FAIL'}\n\n")
-        fh.write("| Scraper | Files | R2 files | Unique ads | Checks | Status |\n")
-        fh.write("|---------|------:|---------:|-----------:|-------:|:------:|\n")
+        fh.write("| Scraper | Files | R2 files | Unique ads | Unique phones | Checks | Status |\n")
+        fh.write("|---------|------:|---------:|-----------:|--------------:|-------:|:------:|\n")
         for entry in report["scrapers"]:
             icon = "✅" if entry["all_passed"] else "❌"
             fh.write(
                 f"| {entry['scraper']} | {entry['files_found']} | "
                 f"{entry.get('r2_file_count', 0)} | "
                 f"{entry.get('unique_ads', 0)} | "
+                f"{entry.get('unique_phones', 0)} | "
                 f"{entry['checks_passed']}/{entry['checks_total']} | {icon} |\n"
             )
         if "total_unique_ads" in report or "total_r2_files" in report:
@@ -729,10 +731,16 @@ def main():
             )
             scraper_result["unique_ads"] = ads_stats.get("unique_ads") or 0
             scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
+            scraper_result["unique_phones"] = ads_stats.get("unique_phones") or 0
             scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
+            scraper_result["subcategory_breakdown"] = ads_stats.get("subcategory_breakdown") or []
+            scraper_result["hourly_ads"] = ads_stats.get("hourly_ads") or []
+            scraper_result["peak_hour"] = ads_stats.get("peak_hour")
+            scraper_result["peak_ads"] = ads_stats.get("peak_ads") or 0
             print(
                 f"    ads    : {scraper_result['unique_ads']} unique "
                 f"({scraper_result['ads_source']})"
+                f" | phones: {scraper_result['unique_phones']}"
             )
 
             status_str = "PASS" if scraper_result["all_passed"] else "FAIL"
@@ -756,12 +764,18 @@ def main():
         total_r2_files = sum(r.get("r2_file_count") or 0 for r in report_scrapers)
 
     report = {
+        "report_schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "date": report_date,
         "days_lookback": args.days_lookback,
         "overall_pass": not any_failure,
         "total_unique_ads": sum(
             r.get("unique_ads") or 0
+            for r in all_results
+            if r.get("date") == report_date
+        ),
+        "total_unique_phones": sum(
+            r.get("unique_phones") or 0
             for r in all_results
             if r.get("date") == report_date
         ),

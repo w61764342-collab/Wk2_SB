@@ -27,6 +27,26 @@ ID_COLUMN_ALIASES = frozenset(
     }
 )
 JSON_COUNT_KEYS = ("total_listings", "total_ads", "listings_count")
+PHONE_COLUMN_ALIASES = frozenset(
+    {
+        "mobile number",
+        "mobile_number",
+        "telephone",
+        "phone",
+        "phone number",
+        "contact number",
+        "whatsapp",
+    }
+)
+PUBLISHED_COLUMN_ALIASES = frozenset(
+    {
+        "date published",
+        "date_published",
+        "published at",
+        "published_at",
+    }
+)
+LEVEL3_COLUMN_ALIASES = frozenset({"level 3", "level_3", "brand", "model"})
 
 
 def _norm_col(name: Any) -> str:
@@ -47,13 +67,72 @@ def _find_id_column(columns: list[Any]) -> str | None:
     return None
 
 
+def _find_col_by_alias(columns: list[Any], aliases: frozenset[str]) -> str | None:
+    for col in columns:
+        if _norm_col(col) in aliases:
+            return col
+    return None
+
+
+def _normalize_phone(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) < 6:
+        return ""
+    return digits
+
+
+def _extract_hour(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return int(value.hour)
+    if hasattr(value, "hour") and isinstance(getattr(value, "hour", None), int):
+        return int(value.hour)
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # Fast path for HH:MM(:SS) patterns without pandas parsing overhead.
+    import re
+
+    m = re.search(r"\b([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b", text)
+    if m:
+        return int(m.group(1))
+
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return int(parsed.hour)
+
+
+def _peak_from_hourly(hourly: dict[int, int]) -> tuple[int | None, int]:
+    if not hourly:
+        return None, 0
+    peak_hour = min(hourly.keys())
+    peak_ads = -1
+    for hour, count in hourly.items():
+        if count > peak_ads or (count == peak_ads and hour < peak_hour):
+            peak_hour = hour
+            peak_ads = count
+    return peak_hour, peak_ads
+
+
 def _count_from_excel_files(
     excel_downloads: list[tuple[str, bytes]],
-) -> tuple[int, int, str | None]:
-    """Return (unique_ads, total_rows, source) from Excel bytes."""
+) -> dict:
+    """Return ad/phone/hierarchy metrics from Excel bytes."""
     all_ids: set[str] = set()
+    all_phones: set[str] = set()
     total_rows = 0
     saw_id_column = False
+    subcategory_breakdown: list[dict[str, Any]] = []
+    scraper_hourly: dict[int, int] = {}
 
     for _key, raw in excel_downloads:
         try:
@@ -69,15 +148,103 @@ def _count_from_excel_files(
 
             n = len(df)
             total_rows += n
-            id_col = _find_id_column(list(df.columns))
-            if id_col is None:
-                continue
 
-            saw_id_column = True
-            for val in df[id_col].dropna():
-                text = str(val).strip()
-                if text:
-                    all_ids.add(text)
+            columns = list(df.columns)
+            id_col = _find_id_column(columns)
+            phone_col = _find_col_by_alias(columns, PHONE_COLUMN_ALIASES)
+            date_col = _find_col_by_alias(columns, PUBLISHED_COLUMN_ALIASES)
+            level3_col = _find_col_by_alias(columns, LEVEL3_COLUMN_ALIASES)
+
+            sheet_ids: set[str] = set()
+            if id_col is not None:
+                saw_id_column = True
+                for val in df[id_col].dropna():
+                    text = str(val).strip()
+                    if text:
+                        sheet_ids.add(text)
+                        all_ids.add(text)
+
+            sheet_phones: set[str] = set()
+            if phone_col is not None:
+                for val in df[phone_col].dropna():
+                    phone = _normalize_phone(val)
+                    if phone:
+                        sheet_phones.add(phone)
+                        all_phones.add(phone)
+
+            sheet_hourly: dict[int, int] = {}
+            if date_col is not None:
+                for val in df[date_col].dropna():
+                    hour = _extract_hour(val)
+                    if hour is None:
+                        continue
+                    sheet_hourly[hour] = sheet_hourly.get(hour, 0) + 1
+                    scraper_hourly[hour] = scraper_hourly.get(hour, 0) + 1
+
+            level3_breakdown: list[dict[str, Any]] = []
+            if level3_col is not None:
+                level3_series = df[level3_col].fillna("").astype(str).str.strip()
+                for level3 in sorted({v for v in level3_series.tolist() if v}):
+                    mask = level3_series == level3
+                    lvl_rows = int(mask.sum())
+                    if lvl_rows <= 0:
+                        continue
+                    if id_col is not None:
+                        lvl_ads = (
+                            df.loc[mask, id_col].dropna().astype(str).str.strip().replace("", pd.NA).dropna().nunique()
+                        )
+                        ads_count = int(lvl_ads) if lvl_ads else lvl_rows
+                    else:
+                        ads_count = lvl_rows
+                    level3_breakdown.append(
+                        {
+                            "level_3": level3,
+                            "ads_count": ads_count,
+                            "sheet_rows": lvl_rows,
+                            "sheets_count": 1,
+                        }
+                    )
+
+            sheet_unique_ads = len(sheet_ids) if sheet_ids else n
+            peak_hour, peak_ads = _peak_from_hourly(sheet_hourly)
+            subcategory_breakdown.append(
+                {
+                    "subcategory": str(sheet_name),
+                    "ads_count": int(sheet_unique_ads),
+                    "sheet_rows": int(n),
+                    "sheets_count": 1,
+                    "unique_phones": int(len(sheet_phones)),
+                    "peak_hour": peak_hour,
+                    "peak_ads": int(peak_ads),
+                    "level_3_breakdown": level3_breakdown,
+                }
+            )
+
+    if saw_id_column and all_ids:
+        ads_source = "excel_ids"
+        unique_ads = len(all_ids)
+    elif total_rows > 0:
+        ads_source = "excel_rows"
+        unique_ads = total_rows
+    else:
+        ads_source = "none"
+        unique_ads = 0
+
+    scraper_peak_hour, scraper_peak_ads = _peak_from_hourly(scraper_hourly)
+    hourly_ads = [
+        {"hour": h, "ads_count": int(scraper_hourly[h])}
+        for h in sorted(scraper_hourly.keys())
+    ]
+    return {
+        "unique_ads": int(unique_ads),
+        "total_rows": int(total_rows),
+        "ads_source": ads_source,
+        "unique_phones": int(len(all_phones)),
+        "subcategory_breakdown": subcategory_breakdown,
+        "hourly_ads": hourly_ads,
+        "peak_hour": scraper_peak_hour,
+        "peak_ads": int(scraper_peak_ads),
+    }
 
     if saw_id_column and all_ids:
         return len(all_ids), total_rows, "excel_ids"
@@ -166,27 +333,51 @@ def count_scraper_ads(
 
     Priority: excel_ids → json_summary → excel_rows → none
     """
-    unique, total_rows, excel_source = _count_from_excel_files(excel_downloads)
-    if excel_source == "excel_ids":
+    excel_stats = _count_from_excel_files(excel_downloads)
+    if excel_stats["ads_source"] == "excel_ids":
         return {
-            "unique_ads": unique,
-            "total_rows": total_rows,
+            "unique_ads": excel_stats["unique_ads"],
+            "total_rows": excel_stats["total_rows"],
             "ads_source": "excel_ids",
+            "unique_phones": excel_stats["unique_phones"],
+            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+            "hourly_ads": excel_stats["hourly_ads"],
+            "peak_hour": excel_stats["peak_hour"],
+            "peak_ads": excel_stats["peak_ads"],
         }
 
     json_count = _count_from_json_summaries(r2_client, bucket, r2_base, partition_dt)
     if json_count is not None:
         return {
             "unique_ads": json_count,
-            "total_rows": total_rows or json_count,
+            "total_rows": excel_stats["total_rows"] or json_count,
             "ads_source": "json_summary",
+            "unique_phones": excel_stats["unique_phones"],
+            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+            "hourly_ads": excel_stats["hourly_ads"],
+            "peak_hour": excel_stats["peak_hour"],
+            "peak_ads": excel_stats["peak_ads"],
         }
 
-    if excel_source == "excel_rows":
+    if excel_stats["ads_source"] == "excel_rows":
         return {
-            "unique_ads": unique,
-            "total_rows": total_rows,
+            "unique_ads": excel_stats["unique_ads"],
+            "total_rows": excel_stats["total_rows"],
             "ads_source": "excel_rows",
+            "unique_phones": excel_stats["unique_phones"],
+            "subcategory_breakdown": excel_stats["subcategory_breakdown"],
+            "hourly_ads": excel_stats["hourly_ads"],
+            "peak_hour": excel_stats["peak_hour"],
+            "peak_ads": excel_stats["peak_ads"],
         }
 
-    return {"unique_ads": 0, "total_rows": 0, "ads_source": "none"}
+    return {
+        "unique_ads": 0,
+        "total_rows": 0,
+        "ads_source": "none",
+        "unique_phones": 0,
+        "subcategory_breakdown": [],
+        "hourly_ads": [],
+        "peak_hour": None,
+        "peak_ads": 0,
+    }
