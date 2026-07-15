@@ -334,16 +334,24 @@ def _lookback_start(partition_date: str, schedule: Optional[str]) -> datetime:
     return start - timedelta(days=days)
 
 
-def _github_request(url: str, token: str) -> Any:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "schema-monitor",
-        },
-    )
+def _github_request(url: str, token: str = "") -> Any:
+    """
+    Perform a GitHub REST API request.
+
+    If a token is supplied, use authenticated requests (higher rate limits).
+    Otherwise, use unauthenticated requests, which work for public repositories.
+    """
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "schema-monitor",
+    }
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, headers=headers)
+
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -419,10 +427,17 @@ def fetch_pipeline_github_meta(
     if not entries:
         return None
 
-    token = (token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
-    if not token:
-        log.info("Skipping GitHub workflow lookup — no GITHUB_TOKEN")
-        return None
+    token = (
+        token
+        or os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("GH_TOKEN")
+        or ""
+    ).strip()
+
+    if token:
+        log.info("Using authenticated GitHub API.")
+    else:
+        log.info("No GitHub token found. Using unauthenticated GitHub API (public repositories).")
 
     not_before = _lookback_start(partition_date, site.get("schedule"))
 
