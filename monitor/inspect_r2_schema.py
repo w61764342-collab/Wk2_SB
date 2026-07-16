@@ -68,7 +68,9 @@ from botocore.exceptions import ClientError
 CONFIG_PATH = Path(__file__).parent.parent / "websites-config.yml"
 CONFIG_R2_SUFFIX = "monitor/websites-config.yml"
 DEFAULT_R2_PREFIX = "boshamlan-data"
-EXCEL_FOLDER = "excel files"  # folder name used by both S3Uploader.py variants
+# Some scrapers upload under "excel files/" while others use "excel-files/".
+# Monitor must read both so category/time-period metrics do not disappear.
+EXCEL_FOLDERS = ("excel files", "excel-files")
 
 # Adaptive row-count bounds kick in after this many observed runs in monitor_stats.yml.
 ADAPTIVE_MIN_RUNS = 3
@@ -614,14 +616,22 @@ def main():
                 )
                 print(f"    r2_file_count: {scraper_r2_counts[r2_count_key]:,}")
             partition = date_partition(check_date)
-            prefix = f"{base_path}/{partition}/{EXCEL_FOLDER}/"
             is_wildcard = "{" in pattern
 
             print(f"\n  [{scraper_name}]")
-            print(f"    prefix : {prefix}")
+            prefixes = [f"{base_path}/{partition}/{folder}/" for folder in EXCEL_FOLDERS]
+            print(f"    prefixes: {' | '.join(prefixes)}")
 
-            # List objects
-            all_objects = list(list_objects(client, bucket, prefix))
+            # List objects across both supported Excel folder naming variants.
+            all_objects: list[dict] = []
+            seen_keys: set[str] = set()
+            for prefix in prefixes:
+                for obj in list_objects(client, bucket, prefix):
+                    key = obj.get("Key")
+                    if not key or key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    all_objects.append(obj)
             xlsx_objects = [o for o in all_objects if o["Key"].endswith(".xlsx")]
 
             if is_wildcard:
