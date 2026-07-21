@@ -23,6 +23,19 @@ class OfficeScraper:
         self.agents_url = f"{self.base_url}/agents"
         self.browser = None
         self.context = None
+        self.requests_total = 0
+        self.requests_failed = 0
+
+    def _record_http_result(self, status_code=None, failed=False):
+        self.requests_total += 1
+        if failed or (status_code is not None and status_code >= 400):
+            self.requests_failed += 1
+
+    def get_request_metrics(self):
+        return {
+            'requests_total': self.requests_total,
+            'requests_failed': self.requests_failed,
+        }
     
     async def scrape_all_offices(self, filter_date=None):
         """
@@ -45,6 +58,10 @@ class OfficeScraper:
             # Use random user-agent and browser settings
             context_args = get_playwright_context_args()
             self.context = await self.browser.new_context(**context_args)
+
+            # Track browser HTTP traffic for throughput/error metrics.
+            self.context.on('response', lambda response: self._record_http_result(status_code=response.status))
+            self.context.on('requestfailed', lambda request: self._record_http_result(failed=True))
             
             try:
                 # Step 1: Get all offices from main agents page

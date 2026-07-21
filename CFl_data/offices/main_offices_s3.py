@@ -184,6 +184,7 @@ class OfficeDataPipeline:
         # Default to yesterday
         if filter_date is None:
             filter_date = datetime.now() - timedelta(days=1)
+        run_started_at = datetime.now()
         
         print("="*80)
         print(f"OFFICE DATA PIPELINE (Cloudflare R2) - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -276,6 +277,13 @@ class OfficeDataPipeline:
             
             print(f"\n\u2713 Uploaded {len(uploaded_urls)} files to R2")
 
+            elapsed_seconds = max(1, int((datetime.now() - run_started_at).total_seconds()))
+            request_metrics = self.scraper.get_request_metrics()
+            requests_total = int(request_metrics.get('requests_total', 0) or 0)
+            requests_failed = int(request_metrics.get('requests_failed', 0) or 0)
+            requests_per_min = round(requests_total / (elapsed_seconds / 60.0), 2) if elapsed_seconds > 0 else 0.0
+            error_rate_pct = round((requests_failed / requests_total) * 100.0, 2) if requests_total > 0 else 0.0
+
             summary = {
                 "scraped_at": datetime.now().isoformat(timespec="seconds"),
                 "saved_to_s3_date": datetime.now().strftime("%Y-%m-%d"),
@@ -288,6 +296,14 @@ class OfficeDataPipeline:
                     }
                     for office in offices_data
                 ],
+                "request_metrics": {
+                    "requests_total": requests_total,
+                    "requests_failed": requests_failed,
+                    "requests_per_min": requests_per_min,
+                    "error_rate_pct": error_rate_pct,
+                    "duration_sec": elapsed_seconds,
+                    "metrics_source": "runtime_http_counter",
+                },
             }
             self.s3_uploader.upload_json_summary(summary)
         else:

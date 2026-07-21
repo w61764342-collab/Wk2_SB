@@ -27,6 +27,8 @@ class CategoryScraper:
         """
         self.debug = debug
         self.last_scraped_data = {}  # Store scraped data for image uploading
+        self.requests_total = 0
+        self.requests_failed = 0
         # Define category structure
         self.categories = {
             'rent': {
@@ -116,6 +118,9 @@ class CategoryScraper:
                 # Use PropertyCardScraper to scrape this URL
                 scraper = PropertyCardScraper(url)
                 result = await scraper.scrape_cards()
+                metrics = scraper.get_request_metrics()
+                self.requests_total += metrics.get('requests_total', 0)
+                self.requests_failed += metrics.get('requests_failed', 0)
                 
                 if result and result != "No cards found on this page.":
                     try:
@@ -146,6 +151,12 @@ class CategoryScraper:
             print(f"\n⚠ Warning: {len(failed_subcats)} subcategory(ies) failed: {', '.join(failed_subcats)}")
         
         return category_data
+
+    def get_request_metrics(self):
+        return {
+            'requests_total': self.requests_total,
+            'requests_failed': self.requests_failed,
+        }
     
     def save_to_excel(self, category_name, category_data, image_s3_mapping=None):
         """

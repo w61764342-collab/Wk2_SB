@@ -52,6 +52,7 @@ class MainS3Scraper:
         4. Uploads Excel files to S3 in 'excel files' folder
         """
         print("="*80)
+        run_started_at = datetime.now()
         print("BOSHAMLAN SCRAPER - Cloudflare R2 Edition")
         print("="*80)
         print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -139,11 +140,27 @@ class MainS3Scraper:
                         "listings_count": count,
                     }
                 )
+
+        elapsed_seconds = max(1, int((datetime.now() - run_started_at).total_seconds()))
+        request_metrics = self.category_scraper.get_request_metrics()
+        requests_total = int(request_metrics.get('requests_total', 0) or 0)
+        requests_failed = int(request_metrics.get('requests_failed', 0) or 0)
+        requests_per_min = round(requests_total / (elapsed_seconds / 60.0), 2) if elapsed_seconds > 0 else 0.0
+        error_rate_pct = round((requests_failed / requests_total) * 100.0, 2) if requests_total > 0 else 0.0
+
         summary = {
             "scraped_at": datetime.now().isoformat(timespec="seconds"),
             "saved_to_s3_date": datetime.now().strftime("%Y-%m-%d"),
             "total_listings": total_listings,
             "subcategories": subcategories,
+            "request_metrics": {
+                "requests_total": requests_total,
+                "requests_failed": requests_failed,
+                "requests_per_min": requests_per_min,
+                "error_rate_pct": error_rate_pct,
+                "duration_sec": elapsed_seconds,
+                "metrics_source": "runtime_http_counter",
+            },
         }
         self.s3_uploader.upload_json_summary(summary)
         

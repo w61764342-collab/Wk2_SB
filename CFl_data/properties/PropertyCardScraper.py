@@ -23,6 +23,19 @@ class PropertyCardScraper:
         self.url = url
         self.browser = None
         self.context = None
+        self.requests_total = 0
+        self.requests_failed = 0
+
+    def _record_http_result(self, status_code=None, failed=False):
+        self.requests_total += 1
+        if failed or (status_code is not None and status_code >= 400):
+            self.requests_failed += 1
+
+    def get_request_metrics(self):
+        return {
+            'requests_total': self.requests_total,
+            'requests_failed': self.requests_failed,
+        }
 
     async def scrape_cards(self, max_retries=2):
         async with async_playwright() as p:
@@ -30,6 +43,11 @@ class PropertyCardScraper:
             # Use random user-agent and browser settings
             context_args = get_playwright_context_args()
             self.context = await self.browser.new_context(**context_args)
+
+            # Count every HTTP response in the browser context.
+            self.context.on('response', lambda response: self._record_http_result(status_code=response.status))
+            self.context.on('requestfailed', lambda request: self._record_http_result(failed=True))
+
             main_page = await self.context.new_page()
 
             try:
@@ -286,6 +304,7 @@ class PropertyCardScraper:
             
             async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    self._record_http_result(status_code=response.status)
                     if response.status == 200:
                         data = await response.json()
                         # The actual data is in data['data']
@@ -294,6 +313,7 @@ class PropertyCardScraper:
                         print(f"  API returned status {response.status} for post {post_id}")
                         return None
         except Exception as e:
+            self._record_http_result(failed=True)
             print(f"  API error for post {post_id}: {e}")
             return None
 
