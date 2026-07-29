@@ -35,6 +35,7 @@ class OfficeS3Uploader:
         if not self.bucket_name:
             raise Exception("R2 bucket name is required. Set CF_R2_BUCKET_NAME environment variable.")
         self.base_path = 'boshamlan-data/offices'
+        self.json_folder = 'json version'
 
         # Get credentials from parameters or environment variables
         access_key = r2_access_key_id or os.environ.get('CF_R2_ACCESS_KEY_ID')
@@ -64,6 +65,15 @@ class OfficeS3Uploader:
         except NoCredentialsError:
             raise Exception("Cloudflare R2 credentials not found. Please configure credentials.")
     
+    def _build_date_partition(self, upload_date=None):
+        if upload_date is None:
+            upload_date = datetime.now()
+        return f"year={upload_date.year}/month={upload_date.month:02d}/day={upload_date.day:02d}"
+
+    def _build_partitioned_key(self, folder_name, file_name, upload_date=None):
+        date_partition = self._build_date_partition(upload_date)
+        return f"{self.base_path}/{date_partition}/{folder_name}/{file_name}"
+
     def upload_excel_file(self, file_path, upload_date=None):
         """
         Upload an Excel file to S3 with date partitioning in 'excel files' folder.
@@ -78,13 +88,8 @@ class OfficeS3Uploader:
         if upload_date is None:
             upload_date = datetime.now()
         
-        # Create S3 key with date partitioning and excel files folder
-        year = upload_date.strftime('%Y')
-        month = upload_date.strftime('%m')
-        day = upload_date.strftime('%d')
-        
         file_name = os.path.basename(file_path)
-        s3_key = f"{self.base_path}/year={year}/month={month}/day={day}/excel files/{file_name}"
+        s3_key = self._build_partitioned_key('excel files', file_name, upload_date)
         
         try:
             # Upload file
@@ -139,6 +144,38 @@ class OfficeS3Uploader:
         except ClientError as e:
             raise Exception(f"Failed to upload to R2: {e}")
     
+    def upload_json_file(self, json_data, file_name, upload_date=None):
+        """Upload a JSON payload to the date-partitioned 'json version' folder."""
+        s3_key = self._build_partitioned_key(self.json_folder, file_name, upload_date)
+        body = json.dumps(json_data, ensure_ascii=False, indent=2).encode("utf-8")
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=body,
+                ContentType="application/json",
+            )
+            s3_url = f"r2://{self.bucket_name}/{s3_key}"
+            print(f"Uploaded JSON file to {s3_url}")
+            return s3_url
+        except ClientError as e:
+            print(f"Failed to upload JSON file: {e}")
+            return None
+
+    def upload_json_file_from_path(self, file_path, file_name, upload_date=None):
+        """Read a local JSON file and upload it under the partitioned 'json version' folder."""
+        if not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            return None
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as handle:
+                json_data = json.load(handle)
+            return self.upload_json_file(json_data, file_name, upload_date)
+        except Exception as e:
+            print(f"Failed to read JSON file {file_path}: {e}")
+            return None
+
     def upload_multiple_files(self, file_paths, upload_date=None):
         """
         Upload multiple Excel files to S3.
@@ -166,12 +203,9 @@ class OfficeS3Uploader:
         if upload_date is None:
             upload_date = datetime.now()
 
-        year = upload_date.strftime('%Y')
-        month = upload_date.strftime('%m')
-        day = upload_date.strftime('%d')
         if filename is None:
             filename = f"summary_{upload_date.strftime('%Y%m%d')}.json"
-        s3_key = f"{self.base_path}/year={year}/month={month}/day={day}/json-files/{filename}"
+        s3_key = self._build_partitioned_key('json-files', filename, upload_date)
 
         body = json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8")
         try:

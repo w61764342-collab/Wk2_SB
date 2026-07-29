@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timedelta
@@ -101,6 +102,39 @@ class OfficeDataPipeline:
         
         return name
     
+    def generate_office_json(self, office_data, output_dir):
+        """Generate a JSON file for a single office for R2 upload."""
+        office_name = office_data.get('name', 'Unknown Office')
+        safe_name = self._clean_filename(office_name)
+
+        office_url = office_data.get('url', '')
+        url_id = office_url.split('/')[-1] if office_url else ''
+
+        if url_id:
+            json_path = os.path.join(output_dir, f"{safe_name}_{url_id}.json")
+        else:
+            json_path = os.path.join(output_dir, f"{safe_name}.json")
+
+        payload = {
+            'name': office_data.get('name', ''),
+            'url': office_data.get('url', ''),
+            'description': office_data.get('description', ''),
+            'telephone': office_data.get('telephone', ''),
+            'email': office_data.get('email', ''),
+            'image': office_data.get('image', ''),
+            'instagram': office_data.get('instagram', ''),
+            'website': office_data.get('website', ''),
+            'ads_number': office_data.get('ads_number', 0),
+            'listings': office_data.get('listings', []),
+            'generated_at': datetime.now().isoformat(timespec='seconds')
+        }
+
+        with open(json_path, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+        print(f"Generated JSON file: {json_path}")
+        return json_path
+
     def generate_office_excel(self, office_data, output_dir):
         """
         Generate Excel file for a single office using pandas.
@@ -254,15 +288,20 @@ class OfficeDataPipeline:
         os.makedirs(self.temp_dir, exist_ok=True)
         
         excel_files = []
+        json_files = []
         for office in offices_data:
             try:
                 file_path = self.generate_office_excel(office, self.temp_dir)
                 excel_files.append(file_path)
+
+                json_path = self.generate_office_json(office, self.temp_dir)
+                if json_path:
+                    json_files.append(json_path)
             except Exception as e:
                 office_name = office.get('name', 'Unknown')
-                print(f"Error generating Excel for {office_name}: {e}")
+                print(f"Error generating Excel/JSON for {office_name}: {e}")
         
-        print(f"\n✓ Generated {len(excel_files)} Excel files")
+        print(f"\n✓ Generated {len(excel_files)} Excel files and {len(json_files)} JSON files")
         
         # Step 4: Upload Excel files to S3
         uploaded_urls = []
@@ -274,8 +313,18 @@ class OfficeDataPipeline:
             
             # Use today's date for R2 partitioning (not filter date)
             uploaded_urls = self.s3_uploader.upload_multiple_files(excel_files)
+
+            json_upload_urls = []
+            for json_path in json_files:
+                try:
+                    file_name = os.path.basename(json_path)
+                    s3_url = self.s3_uploader.upload_json_file_from_path(json_path, file_name)
+                    if s3_url:
+                        json_upload_urls.append(s3_url)
+                except Exception as e:
+                    print(f"Error uploading JSON file {json_path}: {e}")
             
-            print(f"\n\u2713 Uploaded {len(uploaded_urls)} files to R2")
+            print(f"\n✓ Uploaded {len(uploaded_urls)} Excel files and {len(json_upload_urls)} JSON files to R2")
 
             elapsed_seconds = max(1, int((datetime.now() - run_started_at).total_seconds()))
             request_metrics = self.scraper.get_request_metrics()

@@ -110,6 +110,10 @@ class MainS3Scraper:
             file_path = self.category_scraper.save_to_excel(category_name, category_data, category_image_mapping)
             if file_path:
                 excel_files[category_name] = file_path
+
+            json_path = self.category_scraper.save_to_json(category_name, category_data, category_image_mapping)
+            if json_path:
+                self.s3_uploader.upload_json_file_from_path(json_path, f"{category_name}.json")
         
         if not excel_files:
             print("WARNING: No Excel files were generated.")

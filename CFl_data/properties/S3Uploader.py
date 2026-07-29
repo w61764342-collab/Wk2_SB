@@ -35,6 +35,7 @@ class S3Uploader:
             raise Exception("R2 bucket name is required. Set CF_R2_BUCKET_NAME environment variable.")
         self.base_path = 'boshamlan-data/properties'
         self.excel_folder = 'excel files'
+        self.json_folder = 'json version'
         self.images_folder = 'images'
 
         # Get credentials from parameters or environment variables
@@ -70,6 +71,15 @@ class S3Uploader:
             print(f"ERROR: Failed to initialize R2 client: {e}")
             raise
     
+    def _build_date_partition(self, upload_date=None):
+        if upload_date is None:
+            upload_date = datetime.now()
+        return f"year={upload_date.year}/month={upload_date.month:02d}/day={upload_date.day:02d}"
+
+    def _build_partitioned_key(self, folder_name, file_name, upload_date=None):
+        date_partition = self._build_date_partition(upload_date)
+        return f"{self.base_path}/{date_partition}/{folder_name}/{file_name}"
+
     def upload_file(self, file_path, category_name):
         """
         Upload a file to S3 with date partitioning.
@@ -91,12 +101,8 @@ class S3Uploader:
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
             
-            # Get today's date for partitioning: year=YYYY/month=MM/day=DD
-            now = datetime.now()
-            date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
-            
             # Construct S3 key: boshamlan-data/properties/year=2026/month=01/day=05/excel files/rent.xlsx
-            s3_key = f"{self.base_path}/{date_partition}/{self.excel_folder}/{category_name}.xlsx"
+            s3_key = self._build_partitioned_key(self.excel_folder, f"{category_name}.xlsx")
             
             print(f"Uploading {file_path} ({file_size_mb:.2f} MB) to S3...")
             
@@ -138,6 +144,42 @@ class S3Uploader:
             print(f"ERROR: Unexpected error while uploading {file_path}: {e}")
             return None
     
+    def upload_json_file(self, json_data, file_name, upload_date=None):
+        """
+        Upload a JSON payload to S3 in the 'json version' folder with date partitioning.
+        """
+        s3_key = self._build_partitioned_key(self.json_folder, file_name, upload_date)
+        body = json.dumps(json_data, ensure_ascii=False, indent=2).encode("utf-8")
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=body,
+                ContentType="application/json",
+            )
+            s3_uri = f"r2://{self.bucket_name}/{s3_key}"
+            print(f"✓ Uploaded JSON file to {s3_uri}")
+            return s3_uri
+        except ClientError as e:
+            print(f"ERROR: Failed to upload JSON file: {e}")
+            return None
+
+    def upload_json_file_from_path(self, file_path, file_name, upload_date=None):
+        """
+        Read a local JSON file and upload it to S3 under the date-partitioned 'json version' folder.
+        """
+        if not os.path.exists(file_path):
+            print(f"ERROR: JSON file not found: {file_path}")
+            return None
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as handle:
+                json_data = json.load(handle)
+            return self.upload_json_file(json_data, file_name, upload_date)
+        except Exception as e:
+            print(f"ERROR: Failed to read JSON file {file_path}: {e}")
+            return None
+
     def upload_multiple_files(self, file_dict):
         """
         Upload multiple files to S3.
@@ -180,10 +222,9 @@ class S3Uploader:
         Path: {base_path}/year=YYYY/month=MM/day=DD/json-files/{filename}
         """
         now = datetime.now()
-        date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
         if filename is None:
             filename = f"summary_{now.strftime('%Y%m%d')}.json"
-        s3_key = f"{self.base_path}/{date_partition}/json-files/{filename}"
+        s3_key = self._build_partitioned_key('json-files', filename, upload_date)
 
         body = json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8")
         try:

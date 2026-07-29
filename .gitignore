@@ -16,3 +16,4 @@ monitor/__pycache__/inspect_r2_schema.cpython-311.pyc
 monitor/site.yml
 monitor/__pycache__/github_workflows.cpython-311.pyc
 .venv/*
+index.html

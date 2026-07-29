@@ -158,6 +158,47 @@ class CategoryScraper:
             'requests_failed': self.requests_failed,
         }
     
+    def save_to_json(self, category_name, category_data, image_s3_mapping=None):
+        """
+        Save category data to a JSON file for upload to R2.
+        """
+        if not category_data or all(not data for data in category_data.values()):
+            print(f"No data to save as JSON for category: {category_name}")
+            return None
+
+        try:
+            payload = {
+                'category': category_name,
+                'generated_at': datetime.now().isoformat(timespec='seconds'),
+                'subcategories': {}
+            }
+
+            for subcat_name, data in category_data.items():
+                processed_data = []
+                if data:
+                    for item in data:
+                        item_copy = dict(item)
+                        if image_s3_mapping:
+                            image_url = item_copy.get('image_url')
+                            if image_url and image_url in image_s3_mapping:
+                                item_copy['image_r2_path'] = image_s3_mapping[image_url]
+                            else:
+                                item_copy['image_r2_path'] = None
+                        processed_data.append(item_copy)
+
+                payload['subcategories'][subcat_name] = processed_data
+
+            file_path = os.path.join(self.output_dir, f"{category_name}.json")
+            with open(file_path, 'w', encoding='utf-8') as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+            print(f"Saved {category_name} JSON data to {file_path}")
+            return file_path
+
+        except Exception as e:
+            print(f"Error saving JSON file for {category_name}: {e}")
+            return None
+
     def save_to_excel(self, category_name, category_data, image_s3_mapping=None):
         """
         Save category data to Excel file with multiple sheets for subcategories.
