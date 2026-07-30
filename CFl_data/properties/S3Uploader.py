@@ -215,15 +215,17 @@ class S3Uploader:
         
         return results
 
-    def upload_json_summary(self, summary: dict, filename: str | None = None):
+    def upload_json_summary(self, summary: dict, upload_date=None, filename: str | None = None):
         """
         Upload a daily JSON summary for the monitor hub ad counter.
 
         Path: {base_path}/year=YYYY/month=MM/day=DD/json-files/{filename}
         """
-        now = datetime.now()
+        if upload_date is None:
+            upload_date = datetime.now()
+
         if filename is None:
-            filename = f"summary_{now.strftime('%Y%m%d')}.json"
+            filename = f"summary_{upload_date.strftime('%Y%m%d')}.json"
         s3_key = self._build_partitioned_key('json-files', filename, upload_date)
 
         body = json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8")
