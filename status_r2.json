@@ -1,18 +1,18 @@
 {
-  "date": "2026-07-30 02:03:22 UTC",
-  "timestamp": "2026-07-30T02:03:22Z",
+  "date": "2026-07-30 08:59:02 UTC",
+  "timestamp": "2026-07-30T08:59:02Z",
   "storage": "cloudflare-r2",
-  "overall_status": "failed",
+  "overall_status": "success",
   "workflows": {
     "properties": {
-      "status": "failure",
+      "status": "success",
       "workflow": "scraper_r2.yml"
     },
     "offices": {
-      "status": "",
+      "status": "success",
       "workflow": "scraper_r2.yml"
     }
   },
-  "pipeline_run_id": "30505147931",
-  "pipeline_run_number": "94"
+  "pipeline_run_id": "30524280975",
+  "pipeline_run_number": "95"
 }
