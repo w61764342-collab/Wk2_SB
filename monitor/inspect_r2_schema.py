@@ -52,6 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
+from request_metrics import build_run_error_summary, count_scraper_request_metrics
 from r2_file_counter import (
     category_slug_from_excel_pattern,
     count_scraper_r2_files,
@@ -784,11 +785,29 @@ def main():
             scraper_result["ads_by_period"] = ads_stats.get("ads_by_period") or []
             scraper_result["peak_hour"] = ads_stats.get("peak_hour")
             scraper_result["peak_ads"] = ads_stats.get("peak_ads") or 0
+
+            request_stats = count_scraper_request_metrics(client, bucket, base_path, check_date)
+            scraper_result["metrics_source"] = request_stats.get("metrics_source", "none")
+            for key in (
+                "requests_total",
+                "requests_failed",
+                "error_rate_pct",
+                "requests_per_min",
+                "duration_sec",
+                "failed_items_summary",
+            ):
+                if key in request_stats:
+                    scraper_result[key] = request_stats[key]
+
             print(
                 f"    ads    : {scraper_result['unique_ads']} unique "
                 f"({scraper_result['ads_source']})"
                 f" | phones: {scraper_result['unique_phones']}"
             )
+            if request_stats.get("metrics_source") == "json_summary":
+                total = scraper_result.get("requests_total", 0)
+                failed = scraper_result.get("requests_failed", 0)
+                print(f"    http   : {total} requests, {failed} failed")
 
             status_str = "PASS" if scraper_result["all_passed"] else "FAIL"
             print(
@@ -801,6 +820,7 @@ def main():
 
     # Build report
     report_date = end_date.strftime("%Y-%m-%d")
+    report_scrapers = [r for r in all_results if r.get("date") == report_date]
     site_r2_prefix = meta.get("r2_prefix", r2_prefix).strip("/")
     if site_r2_prefix:
         print(f"\n  Site R2 inventory: counting objects under {site_r2_prefix}/ ...")
@@ -809,7 +829,6 @@ def main():
         print(f"  total_r2_files: {total_r2_files:,}")
         print(f"  total_r2_size : {format_bytes(total_r2_size_bytes)}")
     else:
-        report_scrapers = [r for r in all_results if r.get("date") == report_date]
         total_r2_files = sum(r.get("r2_file_count") or 0 for r in report_scrapers)
         total_r2_size_bytes = sum(r.get("r2_size_bytes") or 0 for r in report_scrapers)
 
@@ -831,6 +850,7 @@ def main():
         ),
         "total_r2_files": total_r2_files,
         "total_r2_size_bytes": total_r2_size_bytes,
+        "error_summary": build_run_error_summary(report_scrapers),
         "scrapers": all_results,
     }
 
