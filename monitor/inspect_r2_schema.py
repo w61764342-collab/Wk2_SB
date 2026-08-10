@@ -55,8 +55,10 @@ from github_workflows import build_scraper_run_meta, load_site_run_meta
 from request_metrics import build_run_error_summary, count_scraper_request_metrics
 from r2_file_counter import (
     category_slug_from_excel_pattern,
+    count_scraper_r2_daily_size_bytes,
     count_scraper_r2_files,
     count_scraper_r2_size_bytes,
+    count_site_r2_daily_size_bytes,
     count_site_r2_files,
     count_site_r2_size_bytes,
 )
@@ -514,31 +516,42 @@ def print_summary(report: dict):
     print(f"  Overall      : {'✓ PASS' if report['overall_pass'] else '✗ FAIL'}")
     print("=" * 72)
     print(
-        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'R2 Size':>11}  {'Ads':>6}  {'Phones':>7}  "
+        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'R2 Size':>11}  {'Daily':>11}  {'Ads':>6}  {'Phones':>7}  "
         f"{'Checks':>12}  {'Status':>6}"
     )
-    print("  " + "-" * 98)
+    print("  " + "-" * 110)
     for entry in report["scrapers"]:
         status = "PASS" if entry["all_passed"] else "FAIL"
         print(
             f"  {entry['scraper']:<32} {entry['files_found']:>5}  "
             f"{entry.get('r2_file_count', 0):>7}  "
             f"{format_bytes(entry.get('r2_size_bytes')):>11}  "
+            f"{format_bytes(entry.get('r2_daily_size')):>11}  "
             f"{entry.get('unique_ads', 0):>6}  "
             f"{entry.get('unique_phones', 0):>7}  "
             f"{entry['checks_passed']:>5}/{entry['checks_total']:<5}  {status:>6}"
         )
-    if "total_unique_ads" in report or "total_r2_files" in report or "total_r2_size_bytes" in report:
-        print("  " + "-" * 98)
+    if (
+        "total_unique_ads" in report
+        or "total_r2_files" in report
+        or "total_r2_size_bytes" in report
+        or "total_r2_daily_size" in report
+    ):
+        print("  " + "-" * 110)
         if "total_unique_ads" in report:
             print(
-                f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {'':>7}  {'':>11}  {report['total_unique_ads']:>6}"
+                f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {'':>7}  {'':>11}  {'':>11}  {report['total_unique_ads']:>6}"
             )
         if "total_r2_files" in report:
             print(f"  {'TOTAL R2 FILES':<32} {'':>5}  {report['total_r2_files']:>7}")
         if "total_r2_size_bytes" in report:
             print(
                 f"  {'TOTAL R2 SIZE':<32} {'':>5}  {'':>7}  {format_bytes(report['total_r2_size_bytes']):>11}"
+            )
+        if "total_r2_daily_size" in report:
+            print(
+                f"  {'TOTAL R2 DAILY SIZE':<32} {'':>5}  {'':>7}  {'':>11}  "
+                f"{format_bytes(report['total_r2_daily_size']):>11}"
             )
     print("=" * 72 + "\n")
 
@@ -551,24 +564,32 @@ def write_step_summary(report: dict):
         fh.write("## R2 Schema Monitor — boshamlan.com\n\n")
         fh.write(f"**Date:** `{report['date']}`  \n")
         fh.write(f"**Overall:** {'✅ PASS' if report['overall_pass'] else '❌ FAIL'}\n\n")
-        fh.write("| Scraper | Files | R2 files | R2 size | Unique ads | Unique phones | Checks | Status |\n")
-        fh.write("|---------|------:|---------:|--------:|-----------:|--------------:|-------:|:------:|\n")
+        fh.write("| Scraper | Files | R2 files | R2 size | R2 daily size | Unique ads | Unique phones | Checks | Status |\n")
+        fh.write("|---------|------:|---------:|--------:|--------------:|-----------:|--------------:|-------:|:------:|\n")
         for entry in report["scrapers"]:
             icon = "✅" if entry["all_passed"] else "❌"
             fh.write(
                 f"| {entry['scraper']} | {entry['files_found']} | "
                 f"{entry.get('r2_file_count', 0)} | "
                 f"{format_bytes(entry.get('r2_size_bytes'))} | "
+                f"{format_bytes(entry.get('r2_daily_size'))} | "
                 f"{entry.get('unique_ads', 0)} | "
                 f"{entry.get('unique_phones', 0)} | "
                 f"{entry['checks_passed']}/{entry['checks_total']} | {icon} |\n"
             )
-        if "total_unique_ads" in report or "total_r2_files" in report or "total_r2_size_bytes" in report:
+        if (
+            "total_unique_ads" in report
+            or "total_r2_files" in report
+            or "total_r2_size_bytes" in report
+            or "total_r2_daily_size" in report
+        ):
             ads_total = report.get("total_unique_ads", "")
             r2_total = report.get("total_r2_files", "")
             r2_size_total = format_bytes(report.get("total_r2_size_bytes", 0))
+            r2_daily_total = format_bytes(report.get("total_r2_daily_size", 0))
             fh.write(
-                f"| **Total** | | **{r2_total}** | **{r2_size_total}** | **{ads_total}** | | | |\n"
+                f"| **Total** | | **{r2_total}** | **{r2_size_total}** | **{r2_daily_total}** | "
+                f"**{ads_total}** | | | |\n"
             )
         fh.write("\n")
 
@@ -677,12 +698,18 @@ def main():
             files_found = len(target_objects)
             print(f"    files  : {files_found} found")
 
+            r2_daily_size = count_scraper_r2_daily_size_bytes(
+                client, bucket, base_path, check_date, category_slug
+            )
+            print(f"    r2_daily_size: {format_bytes(r2_daily_size)}")
+
             scraper_result = {
                 "scraper": scraper_name,
                 "date": date_str,
                 "files_found": files_found,
                 "r2_file_count": scraper_r2_counts[r2_count_key],
                 "r2_size_bytes": scraper_r2_sizes[r2_count_key],
+                "r2_daily_size": r2_daily_size,
                 "checks_passed": 0,
                 "checks_total": 0,
                 "all_passed": True,
@@ -826,11 +853,16 @@ def main():
         print(f"\n  Site R2 inventory: counting objects under {site_r2_prefix}/ ...")
         total_r2_files = count_site_r2_files(client, bucket, site_r2_prefix)
         total_r2_size_bytes = count_site_r2_size_bytes(client, bucket, site_r2_prefix)
+        total_r2_daily_size = count_site_r2_daily_size_bytes(
+            client, bucket, site_r2_prefix, end_date
+        )
         print(f"  total_r2_files: {total_r2_files:,}")
         print(f"  total_r2_size : {format_bytes(total_r2_size_bytes)}")
+        print(f"  total_r2_daily_size: {format_bytes(total_r2_daily_size)}")
     else:
         total_r2_files = sum(r.get("r2_file_count") or 0 for r in report_scrapers)
         total_r2_size_bytes = sum(r.get("r2_size_bytes") or 0 for r in report_scrapers)
+        total_r2_daily_size = sum(r.get("r2_daily_size") or 0 for r in report_scrapers)
 
     report = {
         "report_schema_version": 2,
@@ -850,6 +882,7 @@ def main():
         ),
         "total_r2_files": total_r2_files,
         "total_r2_size_bytes": total_r2_size_bytes,
+        "total_r2_daily_size": total_r2_daily_size,
         "error_summary": build_run_error_summary(report_scrapers),
         "scrapers": all_results,
     }

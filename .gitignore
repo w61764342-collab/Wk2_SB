@@ -18,3 +18,4 @@ monitor/__pycache__/github_workflows.cpython-311.pyc
 .venv/*
 *.html
 .js
+monitor/__pycache__/r2_file_counter.cpython-311.pyc

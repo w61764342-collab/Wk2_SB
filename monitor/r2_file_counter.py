@@ -10,6 +10,8 @@ pass category_slug so only that category's Excel files and images are counted.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 _EXCEL_FOLDERS = ("excel files", "excel-files")
 
 # r2_base -> list of non-folder objects (cached for shared prefixes like properties/)
@@ -18,6 +20,24 @@ _PREFIX_OBJECT_CACHE: dict[str, list[dict[str, int | str]]] = {}
 
 def _normalize_prefix(prefix: str) -> str:
     return prefix.strip("/")
+
+
+def _date_partition(partition_dt: date | datetime) -> str:
+    if isinstance(partition_dt, datetime):
+        partition_dt = partition_dt.date()
+    return f"year={partition_dt.year}/month={partition_dt.month:02d}/day={partition_dt.day:02d}"
+
+
+def _list_objects_direct(client, bucket: str, prefix: str) -> list[dict[str, int | str]]:
+    """List objects under *prefix* without using the full-prefix cache."""
+    objects: list[dict[str, int | str]] = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj.get("Key", "")
+            if not key.endswith("/"):
+                objects.append({"Key": key, "Size": _object_size_bytes(obj)})
+    return objects
 
 
 def _object_size_bytes(obj: dict) -> int:
@@ -110,6 +130,29 @@ def count_scraper_r2_size_bytes(
     return sum(_object_size_bytes(obj) for obj in objects)
 
 
+def count_scraper_r2_daily_size_bytes(
+    client,
+    bucket: str,
+    r2_base: str,
+    partition_dt: date | datetime,
+    category_slug: str | None = None,
+) -> int:
+    """Sum object sizes for one scraper partition (year=/month=/day=)."""
+    normalized = _normalize_prefix(r2_base)
+    if not normalized:
+        return 0
+
+    daily_prefix = f"{normalized}/{_date_partition(partition_dt)}/"
+    objects = _list_objects_direct(client, bucket, daily_prefix)
+    if category_slug:
+        return sum(
+            _object_size_bytes(obj)
+            for obj in objects
+            if _object_matches_category(obj, category_slug)
+        )
+    return sum(_object_size_bytes(obj) for obj in objects)
+
+
 def count_site_r2_files(client, bucket: str, r2_prefix: str) -> int:
     """Count every object under the site R2 prefix (includes monitor/ artifacts)."""
     return len(_list_objects(client, bucket, r2_prefix))
@@ -118,3 +161,22 @@ def count_site_r2_files(client, bucket: str, r2_prefix: str) -> int:
 def count_site_r2_size_bytes(client, bucket: str, r2_prefix: str) -> int:
     """Sum object sizes under the site R2 prefix (includes monitor/ artifacts)."""
     return sum(_object_size_bytes(obj) for obj in _list_objects(client, bucket, r2_prefix))
+
+
+def count_site_r2_daily_size_bytes(
+    client,
+    bucket: str,
+    r2_prefix: str,
+    partition_dt: date | datetime,
+) -> int:
+    """Sum object sizes under the site prefix for one date partition."""
+    normalized = _normalize_prefix(r2_prefix)
+    if not normalized:
+        return 0
+
+    partition_needle = f"/{_date_partition(partition_dt)}/"
+    return sum(
+        _object_size_bytes(obj)
+        for obj in _list_objects(client, bucket, normalized)
+        if partition_needle in str(obj.get("Key", ""))
+    )
