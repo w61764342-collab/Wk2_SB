@@ -6,6 +6,10 @@ Usage:
     python -m validation.validate_phones --date 2026-08-15
     python -m validation.validate_phones --date 2026-08-15 --prefix boshamlan-data/
     python -m validation.validate_phones --date 2026-08-15 --show-invalid 50
+
+Report is uploaded to R2 by default:
+    {prefix}/validation/{date}/report.json
+    e.g. boshamlan-data/validation/2026-08-15/report.json
 """
 
 from __future__ import annotations
@@ -81,7 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default="",
-        help="Optional path to write a JSON report",
+        help="Optional local path to also write the JSON report",
+    )
+    parser.add_argument(
+        "--no-upload",
+        action="store_true",
+        help="Skip uploading the report to R2 under {prefix}/validation/{date}/",
     )
     parser.add_argument(
         "--fail-on-invalid",
@@ -283,8 +292,8 @@ def print_summary(args: argparse.Namespace, overall: dict[str, Any]) -> None:
     print("=" * 70)
 
 
-def write_report(path: str, args: argparse.Namespace, overall: dict[str, Any]) -> None:
-    payload = {
+def build_report(args: argparse.Namespace, overall: dict[str, Any]) -> dict[str, Any]:
+    return {
         "date": args.date,
         "prefix": args.prefix,
         "files": overall["files"],
@@ -307,10 +316,47 @@ def write_report(path: str, args: argparse.Namespace, overall: dict[str, Any]) -
         ],
         "reason_counts": dict(overall["reason_counts"]),
     }
+
+
+def write_local_report(path: str, payload: dict[str, Any]) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    log(f"Wrote report: {out}", Color.GREEN)
+    log(f"Wrote local report: {out}", Color.GREEN)
+
+
+def upload_report_to_r2(
+    client,
+    bucket: str,
+    prefix: str,
+    date: str,
+    payload: dict[str, Any],
+) -> str:
+    """Upload report to {prefix}/validation/{date}/report.json."""
+    base = prefix.strip("/")
+    key = f"{base}/validation/{date}/report.json"
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=body,
+        ContentType="application/json",
+    )
+    log(f"Report uploaded → r2://{bucket}/{key}", Color.GREEN)
+    return key
+
+
+def save_reports(
+    args: argparse.Namespace,
+    overall: dict[str, Any],
+    client,
+    bucket: str,
+) -> None:
+    payload = build_report(args, overall)
+    if not args.no_upload:
+        upload_report_to_r2(client, bucket, args.prefix, args.date, payload)
+    if args.output:
+        write_local_report(args.output, payload)
 
 
 def main() -> int:
@@ -343,8 +389,7 @@ def main() -> int:
     if not files:
         log("No Excel files found for that date.", Color.YELLOW)
         print_summary(args, overall)
-        if args.output:
-            write_report(args.output, args, overall)
+        save_reports(args, overall, client, bucket)
         return 1 if args.fail_on_invalid else 0
 
     start = time.time()
@@ -390,9 +435,7 @@ def main() -> int:
 
     log(f"Finished in {time.time() - start:.2f}s", Color.GREEN)
     print_summary(args, overall)
-
-    if args.output:
-        write_report(args.output, args, overall)
+    save_reports(args, overall, client, bucket)
 
     if args.fail_on_invalid and overall["invalid"] > 0:
         return 1

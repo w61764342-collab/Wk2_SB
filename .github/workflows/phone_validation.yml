@@ -86,6 +86,7 @@ jobs:
           fi
 
           echo "Running: python -m validation.validate_phones $FLAGS"
+          echo "R2 report path: ${PREFIX%/}/validation/${{ steps.date.outputs.date }}/report.json"
           python -m validation.validate_phones $FLAGS
 
       - name: Upload validation report
