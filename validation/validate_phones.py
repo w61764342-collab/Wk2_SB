@@ -4,7 +4,7 @@ Scan R2 Excel exports for a date and classify phone numbers as valid / invalid.
 
 Usage:
     python -m validation.validate_phones --date 2026-08-15
-    python -m validation.validate_phones --date 2026-08-15 --prefix 4sale-data/
+    python -m validation.validate_phones --date 2026-08-15 --prefix boshamlan-data/
     python -m validation.validate_phones --date 2026-08-15 --show-invalid 50
 """
 
@@ -57,8 +57,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--prefix",
-        default="4sale-data/",
-        help="R2 key prefix to scan (default: 4sale-data/)",
+        default="boshamlan-data/",
+        help="R2 key prefix to scan (default: boshamlan-data/)",
     )
     parser.add_argument(
         "--show-invalid",

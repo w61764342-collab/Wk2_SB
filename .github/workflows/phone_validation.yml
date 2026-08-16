@@ -16,7 +16,7 @@ on:
         description: "R2 folder prefix"
         required: false
         type: string
-        default: "4sale-data/"
+        default: "boshamlan-data/"
       show_invalid:
         description: "How many invalid samples to print"
         required: false
@@ -68,7 +68,7 @@ jobs:
         run: |
           PREFIX="${{ github.event.inputs.prefix }}"
           if [[ -z "$PREFIX" ]]; then
-            PREFIX="4sale-data/"
+            PREFIX="boshamlan-data/"
           fi
 
           SHOW_INVALID="${{ github.event.inputs.show_invalid }}"
