@@ -516,41 +516,53 @@ def print_summary(report: dict):
     print(f"  Overall      : {'✓ PASS' if report['overall_pass'] else '✗ FAIL'}")
     print("=" * 72)
     print(
-        f"  {'Scraper':<32} {'Files':>5}  {'R2':>7}  {'R2 Size':>11}  {'Daily':>11}  {'Ads':>6}  {'Phones':>7}  "
-        f"{'Checks':>12}  {'Status':>6}"
+        f"  {'Scraper':<28} {'Files':>5}  {'R2':>7}  {'R2 Size':>11}  {'Daily':>11}  "
+        f"{'Ads':>6}  {'Valid':>6}  {'Inv':>5}  {'Out':>5}  {'Status':>6}"
     )
-    print("  " + "-" * 110)
+    print("  " + "-" * 120)
     for entry in report["scrapers"]:
         status = "PASS" if entry["all_passed"] else "FAIL"
         print(
-            f"  {entry['scraper']:<32} {entry['files_found']:>5}  "
+            f"  {entry['scraper']:<28} {entry['files_found']:>5}  "
             f"{entry.get('r2_file_count', 0):>7}  "
             f"{format_bytes(entry.get('r2_size_bytes')):>11}  "
             f"{format_bytes(entry.get('r2_daily_size')):>11}  "
             f"{entry.get('unique_ads', 0):>6}  "
-            f"{entry.get('unique_phones', 0):>7}  "
-            f"{entry['checks_passed']:>5}/{entry['checks_total']:<5}  {status:>6}"
+            f"{entry.get('valid_phones', 0):>6}  "
+            f"{entry.get('invalid_phones', 0):>5}  "
+            f"{entry.get('outside_country_phones', 0):>5}  "
+            f"{status:>6}"
         )
     if (
         "total_unique_ads" in report
         or "total_r2_files" in report
         or "total_r2_size_bytes" in report
         or "total_r2_daily_size" in report
+        or "total_valid_phones" in report
     ):
-        print("  " + "-" * 110)
+        print("  " + "-" * 120)
         if "total_unique_ads" in report:
             print(
-                f"  {'TOTAL UNIQUE ADS':<32} {'':>5}  {'':>7}  {'':>11}  {'':>11}  {report['total_unique_ads']:>6}"
+                f"  {'TOTAL UNIQUE ADS':<28} {'':>5}  {'':>7}  {'':>11}  {'':>11}  "
+                f"{report['total_unique_ads']:>6}"
+            )
+        if "total_valid_phones" in report:
+            print(
+                f"  {'TOTAL PHONES':<28} {'':>5}  {'':>7}  {'':>11}  {'':>11}  {'':>6}  "
+                f"{report.get('total_valid_phones', 0):>6}  "
+                f"{report.get('total_invalid_phones', 0):>5}  "
+                f"{report.get('total_outside_country_phones', 0):>5}"
             )
         if "total_r2_files" in report:
-            print(f"  {'TOTAL R2 FILES':<32} {'':>5}  {report['total_r2_files']:>7}")
+            print(f"  {'TOTAL R2 FILES':<28} {'':>5}  {report['total_r2_files']:>7}")
         if "total_r2_size_bytes" in report:
             print(
-                f"  {'TOTAL R2 SIZE':<32} {'':>5}  {'':>7}  {format_bytes(report['total_r2_size_bytes']):>11}"
+                f"  {'TOTAL R2 SIZE':<28} {'':>5}  {'':>7}  "
+                f"{format_bytes(report['total_r2_size_bytes']):>11}"
             )
         if "total_r2_daily_size" in report:
             print(
-                f"  {'TOTAL R2 DAILY SIZE':<32} {'':>5}  {'':>7}  {'':>11}  "
+                f"  {'TOTAL R2 DAILY SIZE':<28} {'':>5}  {'':>7}  {'':>11}  "
                 f"{format_bytes(report['total_r2_daily_size']):>11}"
             )
     print("=" * 72 + "\n")
@@ -564,8 +576,14 @@ def write_step_summary(report: dict):
         fh.write("## R2 Schema Monitor — boshamlan.com\n\n")
         fh.write(f"**Date:** `{report['date']}`  \n")
         fh.write(f"**Overall:** {'✅ PASS' if report['overall_pass'] else '❌ FAIL'}\n\n")
-        fh.write("| Scraper | Files | R2 files | R2 size | R2 daily size | Unique ads | Unique phones | Checks | Status |\n")
-        fh.write("|---------|------:|---------:|--------:|--------------:|-----------:|--------------:|-------:|:------:|\n")
+        fh.write(
+            "| Scraper | Files | R2 files | R2 size | R2 daily size | Unique ads | "
+            "Valid phones | Invalid phones | Outside country | Checks | Status |\n"
+        )
+        fh.write(
+            "|---------|------:|---------:|--------:|--------------:|-----------:|"
+            "-------------:|---------------:|----------------:|-------:|:------:|\n"
+        )
         for entry in report["scrapers"]:
             icon = "✅" if entry["all_passed"] else "❌"
             fh.write(
@@ -574,7 +592,9 @@ def write_step_summary(report: dict):
                 f"{format_bytes(entry.get('r2_size_bytes'))} | "
                 f"{format_bytes(entry.get('r2_daily_size'))} | "
                 f"{entry.get('unique_ads', 0)} | "
-                f"{entry.get('unique_phones', 0)} | "
+                f"{entry.get('valid_phones', 0)} | "
+                f"{entry.get('invalid_phones', 0)} | "
+                f"{entry.get('outside_country_phones', 0)} | "
                 f"{entry['checks_passed']}/{entry['checks_total']} | {icon} |\n"
             )
         if (
@@ -582,16 +602,23 @@ def write_step_summary(report: dict):
             or "total_r2_files" in report
             or "total_r2_size_bytes" in report
             or "total_r2_daily_size" in report
+            or "total_valid_phones" in report
         ):
-            ads_total = report.get("total_unique_ads", "")
-            r2_total = report.get("total_r2_files", "")
-            r2_size_total = format_bytes(report.get("total_r2_size_bytes", 0))
-            r2_daily_total = format_bytes(report.get("total_r2_daily_size", 0))
             fh.write(
-                f"| **Total** | | **{r2_total}** | **{r2_size_total}** | **{r2_daily_total}** | "
-                f"**{ads_total}** | | | |\n"
+                f"| **Total** | | **{report.get('total_r2_files', '')}** | "
+                f"**{format_bytes(report.get('total_r2_size_bytes', 0))}** | "
+                f"**{format_bytes(report.get('total_r2_daily_size', 0))}** | "
+                f"**{report.get('total_unique_ads', '')}** | "
+                f"**{report.get('total_valid_phones', 0)}** | "
+                f"**{report.get('total_invalid_phones', 0)}** | "
+                f"**{report.get('total_outside_country_phones', 0)}** | | |\n"
             )
         fh.write("\n")
+        fh.write(
+            "_Phone rules: **valid** = Kuwait `965` + 8 digits "
+            "(local first digit `2/4/5/6/9`); **invalid** = malformed; "
+            "**outside country** = country code ≠ `965`._\n\n"
+        )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -803,6 +830,9 @@ def main():
             scraper_result["unique_ads"] = ads_stats.get("unique_ads") or 0
             scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
             scraper_result["unique_phones"] = ads_stats.get("unique_phones") or 0
+            scraper_result["valid_phones"] = ads_stats.get("valid_phones") or 0
+            scraper_result["invalid_phones"] = ads_stats.get("invalid_phones") or 0
+            scraper_result["outside_country_phones"] = ads_stats.get("outside_country_phones") or 0
             scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
             scraper_result["subcategory_breakdown"] = ads_stats.get("subcategory_breakdown") or []
             scraper_result["hourly_ads"] = ads_stats.get("hourly_ads") or []
@@ -830,6 +860,9 @@ def main():
                 f"    ads    : {scraper_result['unique_ads']} unique "
                 f"({scraper_result['ads_source']})"
                 f" | phones: {scraper_result['unique_phones']}"
+                f" (valid={scraper_result['valid_phones']}"
+                f", invalid={scraper_result['invalid_phones']}"
+                f", outside={scraper_result['outside_country_phones']})"
             )
             if request_stats.get("metrics_source") == "json_summary":
                 total = scraper_result.get("requests_total", 0)
@@ -877,6 +910,21 @@ def main():
         ),
         "total_unique_phones": sum(
             r.get("unique_phones") or 0
+            for r in all_results
+            if r.get("date") == report_date
+        ),
+        "total_valid_phones": sum(
+            r.get("valid_phones") or 0
+            for r in all_results
+            if r.get("date") == report_date
+        ),
+        "total_invalid_phones": sum(
+            r.get("invalid_phones") or 0
+            for r in all_results
+            if r.get("date") == report_date
+        ),
+        "total_outside_country_phones": sum(
+            r.get("outside_country_phones") or 0
             for r in all_results
             if r.get("date") == report_date
         ),

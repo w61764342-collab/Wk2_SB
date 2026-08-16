@@ -8,11 +8,19 @@ Shared with the Pro1-Os monitor hub — keep in sync when the hub copy changes.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from validation.phone_validator import validate_phone
 
 SKIP_SHEETS = frozenset({"info", "no data"})
 ID_COLUMN_ALIASES = frozenset(
@@ -74,16 +82,22 @@ def _find_col_by_alias(columns: list[Any], aliases: frozenset[str]) -> str | Non
     return None
 
 
-def _normalize_phone(value: Any) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) < 6:
-        return ""
-    return digits
+def _classify_phone_buckets(value: Any) -> tuple[str, str]:
+    """
+    Return (bucket, normalized_label) for a phone cell.
+
+    bucket is one of: valid | invalid | outside_country
+    Empty cells return ("", "").
+    """
+    result = validate_phone(value)
+    if result.category == "empty":
+        return "", ""
+    label = result.normalized or result.raw
+    if result.category == "valid":
+        return "valid", label
+    if result.category == "outside_country":
+        return "outside_country", label
+    return "invalid", label
 
 
 def _extract_hour(value: Any) -> int | None:
@@ -151,12 +165,33 @@ def _period_from_hour(hour: int) -> str:
     return "20-24 (8pm-12am)"
 
 
+def _empty_phone_bucket_sets() -> dict[str, set[str]]:
+    return {
+        "valid": set(),
+        "invalid": set(),
+        "outside_country": set(),
+    }
+
+
+def _phone_bucket_counts(buckets: dict[str, set[str]]) -> dict[str, int]:
+    valid = len(buckets["valid"])
+    invalid = len(buckets["invalid"])
+    outside = len(buckets["outside_country"])
+    return {
+        "valid_phones": int(valid),
+        "invalid_phones": int(invalid),
+        "outside_country_phones": int(outside),
+        # Backward-compatible total of all classified unique numbers
+        "unique_phones": int(valid + invalid + outside),
+    }
+
+
 def _count_from_excel_files(
     excel_downloads: list[tuple[str, bytes]],
 ) -> dict:
     """Return ad/phone/hierarchy metrics from Excel bytes."""
     all_ids: set[str] = set()
-    all_phones: set[str] = set()
+    phone_buckets = _empty_phone_bucket_sets()
     total_rows = 0
     saw_id_column = False
     subcategory_breakdown: list[dict[str, Any]] = []
@@ -192,13 +227,16 @@ def _count_from_excel_files(
                         sheet_ids.add(text)
                         all_ids.add(text)
 
-            sheet_phones: set[str] = set()
+            sheet_buckets = _empty_phone_bucket_sets()
             if phone_col is not None:
                 for val in df[phone_col].dropna():
-                    phone = _normalize_phone(val)
-                    if phone:
-                        sheet_phones.add(phone)
-                        all_phones.add(phone)
+                    bucket, label = _classify_phone_buckets(val)
+                    if not bucket:
+                        continue
+                    sheet_buckets[bucket].add(label)
+                    phone_buckets[bucket].add(label)
+
+            sheet_phone_counts = _phone_bucket_counts(sheet_buckets)
 
             sheet_hourly: dict[int, int] = {}
             if date_col is not None:
@@ -241,7 +279,10 @@ def _count_from_excel_files(
                     "ads_count": int(sheet_unique_ads),
                     "sheet_rows": int(n),
                     "sheets_count": 1,
-                    "unique_phones": int(len(sheet_phones)),
+                    "unique_phones": sheet_phone_counts["unique_phones"],
+                    "valid_phones": sheet_phone_counts["valid_phones"],
+                    "invalid_phones": sheet_phone_counts["invalid_phones"],
+                    "outside_country_phones": sheet_phone_counts["outside_country_phones"],
                     "peak_hour": peak_hour,
                     "peak_ads": int(peak_ads),
                     "level_3_breakdown": level3_breakdown,
@@ -263,22 +304,17 @@ def _count_from_excel_files(
         {"hour": h, "ads_count": int(scraper_hourly[h])}
         for h in sorted(scraper_hourly.keys())
     ]
+    phone_counts = _phone_bucket_counts(phone_buckets)
     return {
         "unique_ads": int(unique_ads),
         "total_rows": int(total_rows),
         "ads_source": ads_source,
-        "unique_phones": int(len(all_phones)),
+        **phone_counts,
         "subcategory_breakdown": subcategory_breakdown,
         "hourly_ads": hourly_ads,
         "peak_hour": scraper_peak_hour,
         "peak_ads": int(scraper_peak_ads),
     }
-
-    if saw_id_column and all_ids:
-        return len(all_ids), total_rows, "excel_ids"
-    if total_rows > 0:
-        return total_rows, total_rows, "excel_rows"
-    return 0, 0, None
 
 
 def _extract_count_from_json(data: dict) -> int | None:
@@ -364,9 +400,19 @@ def count_scraper_ads(
     """
     excel_stats = _count_from_excel_files(excel_downloads)
 
+    def _phone_fields(stats: dict[str, Any]) -> dict[str, int]:
+        return {
+            "unique_phones": int(stats.get("unique_phones") or 0),
+            "valid_phones": int(stats.get("valid_phones") or 0),
+            "invalid_phones": int(stats.get("invalid_phones") or 0),
+            "outside_country_phones": int(stats.get("outside_country_phones") or 0),
+        }
+
     def _finalize(stats: dict[str, Any], ads_source: str) -> dict[str, Any]:
         finalized = dict(stats)
         finalized["ads_source"] = ads_source
+        phones = _phone_fields(finalized)
+        finalized.update(phones)
 
         if not finalized.get("subcategory_breakdown") and (finalized.get("unique_ads") or 0) > 0:
             fallback_subcategory = f"{scraper_name} (all listings)" if scraper_name else "(all listings)"
@@ -376,7 +422,10 @@ def count_scraper_ads(
                     "ads_count": int(finalized.get("unique_ads") or 0),
                     "sheet_rows": int(finalized.get("total_rows") or 0),
                     "sheets_count": 0,
-                    "unique_phones": int(finalized.get("unique_phones") or 0),
+                    "unique_phones": phones["unique_phones"],
+                    "valid_phones": phones["valid_phones"],
+                    "invalid_phones": phones["invalid_phones"],
+                    "outside_country_phones": phones["outside_country_phones"],
                     "peak_hour": finalized.get("peak_hour"),
                     "peak_ads": int(finalized.get("peak_ads") or 0),
                     "level_3_breakdown": [],
@@ -421,7 +470,7 @@ def count_scraper_ads(
             {
                 "unique_ads": excel_stats["unique_ads"],
                 "total_rows": excel_stats["total_rows"],
-                "unique_phones": excel_stats["unique_phones"],
+                **_phone_fields(excel_stats),
                 "subcategory_breakdown": excel_stats["subcategory_breakdown"],
                 "hourly_ads": excel_stats["hourly_ads"],
                 "peak_hour": excel_stats["peak_hour"],
@@ -436,7 +485,7 @@ def count_scraper_ads(
             {
                 "unique_ads": json_count,
                 "total_rows": excel_stats["total_rows"] or json_count,
-                "unique_phones": excel_stats["unique_phones"],
+                **_phone_fields(excel_stats),
                 "subcategory_breakdown": excel_stats["subcategory_breakdown"],
                 "hourly_ads": excel_stats["hourly_ads"],
                 "peak_hour": excel_stats["peak_hour"],
@@ -450,7 +499,7 @@ def count_scraper_ads(
             {
                 "unique_ads": excel_stats["unique_ads"],
                 "total_rows": excel_stats["total_rows"],
-                "unique_phones": excel_stats["unique_phones"],
+                **_phone_fields(excel_stats),
                 "subcategory_breakdown": excel_stats["subcategory_breakdown"],
                 "hourly_ads": excel_stats["hourly_ads"],
                 "peak_hour": excel_stats["peak_hour"],
@@ -464,6 +513,9 @@ def count_scraper_ads(
             "unique_ads": 0,
             "total_rows": 0,
             "unique_phones": 0,
+            "valid_phones": 0,
+            "invalid_phones": 0,
+            "outside_country_phones": 0,
             "subcategory_breakdown": [],
             "hourly_ads": [],
             "peak_hour": None,
