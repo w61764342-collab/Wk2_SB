@@ -56,11 +56,13 @@ from request_metrics import build_run_error_summary, count_scraper_request_metri
 from r2_file_counter import (
     category_slug_from_excel_pattern,
     count_scraper_r2_daily_size_bytes,
+    count_scraper_r2_inventory_by_type,
     count_scraper_r2_files,
     count_scraper_r2_size_bytes,
     count_site_r2_daily_size_bytes,
     count_site_r2_files,
     count_site_r2_size_bytes,
+    count_site_r2_inventory_by_type,
 )
 
 import boto3
@@ -663,6 +665,7 @@ def main():
     any_failure = False
     scraper_r2_counts: dict[tuple[str, str | None], int] = {}
     scraper_r2_sizes: dict[tuple[str, str | None], int] = {}
+    scraper_r2_inventory_by_type: dict[tuple[str, str | None], dict[str, int]] = {}
 
     for check_date in dates:
         date_str = check_date.strftime("%Y-%m-%d")
@@ -693,6 +696,9 @@ def main():
                 )
                 scraper_r2_sizes[r2_count_key] = count_scraper_r2_size_bytes(
                     client, bucket, base_path, category_slug
+                )
+                scraper_r2_inventory_by_type[r2_count_key] = count_scraper_r2_inventory_by_type(
+                    client, bucket, base_path, category_slug=category_slug
                 )
                 print(f"    r2_file_count: {scraper_r2_counts[r2_count_key]:,}")
                 print(f"    r2_size     : {format_bytes(scraper_r2_sizes[r2_count_key])}")
@@ -729,6 +735,13 @@ def main():
                 client, bucket, base_path, check_date, category_slug
             )
             print(f"    r2_daily_size: {format_bytes(r2_daily_size)}")
+            r2_daily_inventory_by_type = count_scraper_r2_inventory_by_type(
+                client,
+                bucket,
+                base_path,
+                partition_dt=check_date,
+                category_slug=category_slug,
+            )
 
             scraper_result = {
                 "scraper": scraper_name,
@@ -736,7 +749,19 @@ def main():
                 "files_found": files_found,
                 "r2_file_count": scraper_r2_counts[r2_count_key],
                 "r2_size_bytes": scraper_r2_sizes[r2_count_key],
+                "r2_images_bytes": scraper_r2_inventory_by_type[r2_count_key].get("images_bytes", 0),
+                "r2_json_bytes": scraper_r2_inventory_by_type[r2_count_key].get("json_bytes", 0),
+                "r2_excel_bytes": scraper_r2_inventory_by_type[r2_count_key].get("excel_bytes", 0),
+                "r2_csv_bytes": scraper_r2_inventory_by_type[r2_count_key].get("csv_bytes", 0),
+                "r2_parquet_bytes": scraper_r2_inventory_by_type[r2_count_key].get("parquet_bytes", 0),
+                "r2_other_bytes": scraper_r2_inventory_by_type[r2_count_key].get("other_bytes", 0),
                 "r2_daily_size": r2_daily_size,
+                "r2_daily_images_bytes": r2_daily_inventory_by_type.get("images_bytes", 0),
+                "r2_daily_json_bytes": r2_daily_inventory_by_type.get("json_bytes", 0),
+                "r2_daily_excel_bytes": r2_daily_inventory_by_type.get("excel_bytes", 0),
+                "r2_daily_csv_bytes": r2_daily_inventory_by_type.get("csv_bytes", 0),
+                "r2_daily_parquet_bytes": r2_daily_inventory_by_type.get("parquet_bytes", 0),
+                "r2_daily_other_bytes": r2_daily_inventory_by_type.get("other_bytes", 0),
                 "checks_passed": 0,
                 "checks_total": 0,
                 "all_passed": True,
@@ -889,6 +914,12 @@ def main():
         total_r2_daily_size = count_site_r2_daily_size_bytes(
             client, bucket, site_r2_prefix, end_date
         )
+        total_r2_inventory_by_type = count_site_r2_inventory_by_type(
+            client, bucket, site_r2_prefix
+        )
+        total_r2_daily_inventory_by_type = count_site_r2_inventory_by_type(
+            client, bucket, site_r2_prefix, partition_dt=end_date
+        )
         print(f"  total_r2_files: {total_r2_files:,}")
         print(f"  total_r2_size : {format_bytes(total_r2_size_bytes)}")
         print(f"  total_r2_daily_size: {format_bytes(total_r2_daily_size)}")
@@ -896,6 +927,14 @@ def main():
         total_r2_files = sum(r.get("r2_file_count") or 0 for r in report_scrapers)
         total_r2_size_bytes = sum(r.get("r2_size_bytes") or 0 for r in report_scrapers)
         total_r2_daily_size = sum(r.get("r2_daily_size") or 0 for r in report_scrapers)
+        total_r2_inventory_by_type = {
+            f"{t}_bytes": sum((r.get(f"r2_{t}_bytes") or 0) for r in report_scrapers)
+            for t in ("images", "json", "excel", "csv", "parquet", "other")
+        }
+        total_r2_daily_inventory_by_type = {
+            f"{t}_bytes": sum((r.get(f"r2_daily_{t}_bytes") or 0) for r in report_scrapers)
+            for t in ("images", "json", "excel", "csv", "parquet", "other")
+        }
 
     report = {
         "report_schema_version": 2,
@@ -931,6 +970,18 @@ def main():
         "total_r2_files": total_r2_files,
         "total_r2_size_bytes": total_r2_size_bytes,
         "total_r2_daily_size": total_r2_daily_size,
+        "total_r2_images_bytes": total_r2_inventory_by_type.get("images_bytes", 0),
+        "total_r2_json_bytes": total_r2_inventory_by_type.get("json_bytes", 0),
+        "total_r2_excel_bytes": total_r2_inventory_by_type.get("excel_bytes", 0),
+        "total_r2_csv_bytes": total_r2_inventory_by_type.get("csv_bytes", 0),
+        "total_r2_parquet_bytes": total_r2_inventory_by_type.get("parquet_bytes", 0),
+        "total_r2_other_bytes": total_r2_inventory_by_type.get("other_bytes", 0),
+        "total_r2_daily_images_bytes": total_r2_daily_inventory_by_type.get("images_bytes", 0),
+        "total_r2_daily_json_bytes": total_r2_daily_inventory_by_type.get("json_bytes", 0),
+        "total_r2_daily_excel_bytes": total_r2_daily_inventory_by_type.get("excel_bytes", 0),
+        "total_r2_daily_csv_bytes": total_r2_daily_inventory_by_type.get("csv_bytes", 0),
+        "total_r2_daily_parquet_bytes": total_r2_daily_inventory_by_type.get("parquet_bytes", 0),
+        "total_r2_daily_other_bytes": total_r2_daily_inventory_by_type.get("other_bytes", 0),
         "error_summary": build_run_error_summary(report_scrapers),
         "scrapers": all_results,
     }

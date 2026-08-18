@@ -11,8 +11,19 @@ pass category_slug so only that category's Excel files and images are counted.
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Iterable
 
 _EXCEL_FOLDERS = ("excel files", "excel-files")
+
+# File extension → type (lowercase, with leading ".")
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".svg"}
+_JSON_EXTS = {".json"}
+_EXCEL_EXTS = {".xlsx", ".xls", ".xlsm"}
+_CSV_EXTS = {".csv"}
+_PARQUET_EXTS = {".parquet"}
+
+# Flattened output field order (keeps code/exports consistent).
+_R2_TYPES: tuple[str, ...] = ("images", "json", "excel", "csv", "parquet", "other")
 
 # r2_base -> list of non-folder objects (cached for shared prefixes like properties/)
 _PREFIX_OBJECT_CACHE: dict[str, list[dict[str, int | str]]] = {}
@@ -68,10 +79,28 @@ def _key_matches_category(key: str, category_slug: str) -> bool:
     key_lower = key.lower()
 
     for folder in _EXCEL_FOLDERS:
-        if key_lower.endswith(f"/{folder}/{slug}.xlsx"):
+        # Excel category files are usually named "<slug>.xlsx" under
+        # either "excel files/" or "excel-files/".
+        if any(
+            key_lower.endswith(f"/{folder}/{slug}{ext}")
+            for ext in (".xlsx", ".xls", ".xlsm")
+        ):
             return True
 
-    return f"/images/{slug}/" in key_lower
+    # Images are under /images/<slug>/...
+    if f"/images/{slug}/" in key_lower:
+        return True
+
+    # When a shared prefix contains non-Excel files for multiple categories,
+    # restrict them by slug presence to avoid double counting across scrapers.
+    # This is constrained to the category slug.
+    if f"/{slug}/" in key_lower:
+        return True
+    for ext in (".json", ".csv", ".parquet"):
+        if key_lower.endswith(f"{slug}{ext}"):
+            return True
+
+    return False
 
 
 def _object_matches_category(obj: dict[str, int | str], category_slug: str) -> bool:
@@ -102,6 +131,138 @@ def _list_objects(client, bucket: str, r2_base: str) -> list[dict[str, int | str
 def clear_prefix_cache() -> None:
     """Reset cached listings (useful in tests)."""
     _PREFIX_OBJECT_CACHE.clear()
+
+
+def _file_type_from_key(key: str) -> str:
+    """Deduce file type from object key extension."""
+    key_lower = key.lower()
+    # Avoid misclassifying directory marker objects.
+    if key_lower.endswith("/"):
+        return "other"
+
+    for ext in _IMAGE_EXTS:
+        if key_lower.endswith(ext):
+            return "images"
+    for ext in _JSON_EXTS:
+        if key_lower.endswith(ext):
+            return "json"
+    for ext in _EXCEL_EXTS:
+        if key_lower.endswith(ext):
+            return "excel"
+    for ext in _CSV_EXTS:
+        if key_lower.endswith(ext):
+            return "csv"
+    for ext in _PARQUET_EXTS:
+        if key_lower.endswith(ext):
+            return "parquet"
+    return "other"
+
+
+def _inventory_aggregate_by_type(objects: Iterable[dict[str, int | str]]) -> dict[str, int]:
+    """Return counts + byte totals split by file type."""
+    result: dict[str, int] = {f"{t}_count": 0 for t in _R2_TYPES} | {f"{t}_bytes": 0 for t in _R2_TYPES}
+    result["total_count"] = 0
+    result["total_bytes"] = 0
+
+    for obj in objects:
+        key = str(obj.get("Key", ""))
+        size_bytes = _object_size_bytes(obj)
+        t = _file_type_from_key(key)
+        result[f"{t}_count"] += 1
+        result[f"{t}_bytes"] += size_bytes
+        result["total_count"] += 1
+        result["total_bytes"] += size_bytes
+
+    return result
+
+
+def count_r2_inventory_by_type(client, bucket: str, r2_prefix: str) -> dict[str, int]:
+    """Count objects and sum bytes under *r2_prefix*, split by file type."""
+    normalized = _normalize_prefix(r2_prefix)
+    if not normalized:
+        return {f"{t}_count": 0 for t in _R2_TYPES} | {f"{t}_bytes": 0 for t in _R2_TYPES} | {
+            "total_count": 0,
+            "total_bytes": 0,
+        }
+
+    objects = _list_objects(client, bucket, normalized)
+    return _inventory_aggregate_by_type(objects)
+
+
+def count_daily_r2_inventory_by_type(
+    client,
+    bucket: str,
+    r2_prefix: str,
+    partition_dt: date | datetime,
+) -> dict[str, int]:
+    """Count objects and sum bytes in one daily partition folder."""
+    normalized = _normalize_prefix(r2_prefix)
+    if not normalized:
+        return {f"{t}_count": 0 for t in _R2_TYPES} | {f"{t}_bytes": 0 for t in _R2_TYPES} | {
+            "total_count": 0,
+            "total_bytes": 0,
+        }
+
+    daily_prefix = f"{normalized}/{_date_partition(partition_dt)}/"
+    objects = _list_objects_direct(client, bucket, daily_prefix)
+    return _inventory_aggregate_by_type(objects)
+
+
+def count_scraper_r2_inventory_by_type(
+    client,
+    bucket: str,
+    r2_base: str,
+    partition_dt: date | datetime | None = None,
+    category_slug: str | None = None,
+) -> dict[str, int]:
+    """
+    Scraper attribution version of inventory-by-type.
+
+    - When partition_dt is None: counts/sums for the full scraper prefix (cached).
+    - When partition_dt is provided: counts/sums for one daily partition folder.
+    - When category_slug is provided: restricts objects to that category (keeps
+      existing shared-prefix behavior for Excel/images scrapers).
+    """
+    normalized = _normalize_prefix(r2_base)
+    if not normalized:
+        return {f"{t}_count": 0 for t in _R2_TYPES} | {f"{t}_bytes": 0 for t in _R2_TYPES} | {
+            "total_count": 0,
+            "total_bytes": 0,
+        }
+
+    if partition_dt is None:
+        objects = _list_objects(client, bucket, normalized)
+    else:
+        daily_prefix = f"{normalized}/{_date_partition(partition_dt)}/"
+        objects = _list_objects_direct(client, bucket, daily_prefix)
+
+    if category_slug:
+        objects = [obj for obj in objects if _object_matches_category(obj, category_slug)]
+
+    return _inventory_aggregate_by_type(objects)
+
+
+def count_site_r2_inventory_by_type(
+    client,
+    bucket: str,
+    r2_prefix: str,
+    partition_dt: date | datetime | None = None,
+) -> dict[str, int]:
+    """Site inventory-by-type. Includes monitor/ artifacts (same scope as old counters)."""
+    normalized = _normalize_prefix(r2_prefix)
+    if not normalized:
+        return {f"{t}_count": 0 for t in _R2_TYPES} | {f"{t}_bytes": 0 for t in _R2_TYPES} | {
+            "total_count": 0,
+            "total_bytes": 0,
+        }
+
+    if partition_dt is None:
+        objects = _list_objects(client, bucket, normalized)
+    else:
+        daily_prefix = f"{normalized}/{_date_partition(partition_dt)}/"
+        objects = _list_objects_direct(client, bucket, daily_prefix)
+
+    return _inventory_aggregate_by_type(objects)
 
 
 def count_scraper_r2_files(
