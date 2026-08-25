@@ -160,10 +160,13 @@ See [`scraper_utils.py`](scraper_utils.py) for implementation details.
 
 ## 📖 Documentation
 
-- [Workflows Documentation](.github/workflows/README.md)
-- [Pipeline Flow Diagram](.github/workflows/PIPELINE_FLOW.md)
-- [Properties README](properties/README.md)
-- [Offices README](offices/README.md)
+- [Website Behavior Analysis](WEBSITE_BEHAVIOR.md) — how boshamlan.com pages, search, API, and JSON-LD behave
+- [Website Behavior (TXT)](WEBSITE_BEHAVIOR.txt) — plain-text export
+- [Website Behavior (Word)](WEBSITE_BEHAVIOR.docx) — Word export
+- [Workflows Documentation](../.github/workflows/README.md)
+- [Pipeline Flow Diagram](../.github/workflows/PIPELINE_FLOW.md)
+- [Properties README](../properties/README.md)
+- [Offices README](../offices/README.md)
 
 ## 🔍 Monitoring
 
