@@ -249,35 +249,12 @@ class OfficeDataPipeline:
         total_listings = sum(len(office.get('listings', [])) for office in offices_data)
         print(f"✓ Total listings from {filter_date.strftime('%Y-%m-%d')}: {total_listings}")
         
-        # Step 2: Upload images to S3
+        # Step 2: Skip image download/upload (original URLs kept in Excel/JSON)
         uploaded_images_count = 0
-        if upload_to_s3:
-            print("\n" + "="*80)
-            print("\nSTEP 2: Uploading images to R2")
-            print("-" * 80)
-            
-            for office in offices_data:
-                office_name = office.get('name', 'Unknown')
-                office_folder_name = self._clean_filename(office_name)
-                listings = office.get('listings', [])
-                
-                for idx, listing in enumerate(listings, 1):
-                    image_url = listing.get('image_url', '')
-                    if image_url:
-                        print(f"  Uploading image {idx}/{len(listings)} for {office_name}...")
-                        s3_image_url = await self.s3_uploader.download_and_upload_image(
-                            image_url, 
-                            office_folder_name, 
-                            idx
-                        )
-                        if s3_image_url:
-                            listing['s3_image_url'] = s3_image_url
-                            uploaded_images_count += 1
-                        # Random delay between image downloads (0.3-0.8 seconds)
-                        from scraper_utils import random_short_delay
-                        await random_short_delay(0.3, 0.8)
-            
-            print(f"\n\u2713 Uploaded {uploaded_images_count} images to R2")
+        print("\n" + "="*80)
+        print("\nSTEP 2: Skipping image download/upload to R2")
+        print("-" * 80)
+        print("\n\u2713 Image upload disabled — image_url preserved in output files only")
         
         # Step 3: Generate Excel files
         print("\n" + "="*80)
@@ -389,7 +366,7 @@ class OfficeDataPipeline:
         print(f"Total listings: {total_listings}")
         print(f"Excel files generated: {len(excel_files)}")
         print(f"Files uploaded to R2: {len(uploaded_urls)}")
-        print(f"Images uploaded to R2: {uploaded_images_count}")
+        print(f"Images uploaded to R2: {uploaded_images_count} (image upload disabled)")
         
         print("="*80 + "\n")
         

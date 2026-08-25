@@ -47,9 +47,8 @@ class MainS3Scraper:
         """
         Main execution method:
         1. Scrapes all categories and subcategories
-        2. Uploads images to S3 in 'images' folder
-        3. Creates Excel files with image_r2_path column
-        4. Uploads Excel files to S3 in 'excel files' folder
+        2. Creates Excel files with image_url column (image download/upload disabled)
+        3. Uploads Excel files to S3 in 'excel files' folder
         """
         print("="*80)
         run_started_at = datetime.now()
@@ -58,7 +57,7 @@ class MainS3Scraper:
         print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Target R2: r2://data-collection-dl/boshamlan-data/properties/")
         print("  - Excel files -> year=YYYY/month=MM/day=DD/excel files/")
-        print("  - Images -> year=YYYY/month=MM/day=DD/images/")
+        print("  - Images: disabled (not downloaded or uploaded)")
         print("="*80)
 
         # Step 1: Log R2 target
@@ -83,23 +82,11 @@ class MainS3Scraper:
         
         print(f"\n✓ Successfully scraped {len(self.category_scraper.last_scraped_data)} category(ies)")
         
-        # Step 3: Upload images to S3 and get mappings
-        print("\n[3/4] Uploading images to S3...")
+        # Step 3: Skip image download/upload (original URLs kept in Excel/JSON)
+        print("\n[3/4] Skipping image download/upload to R2...")
         image_s3_mappings = {}
         total_images = 0
-        
-        for category_name, category_data in self.category_scraper.last_scraped_data.items():
-            # Get all cards data for this category
-            all_cards = []
-            for subcat_name, subcat_data in category_data.items():
-                all_cards.extend(subcat_data)
-            
-            if all_cards:
-                image_results = await self.s3_uploader.upload_images_from_data(all_cards, category_name)
-                image_s3_mappings[category_name] = image_results
-                total_images += len(image_results)
-        
-        print(f"\n\u2713 Successfully uploaded {total_images} image(s) to R2")
+        print("\n\u2713 Image upload disabled — image_url preserved in output files only")
         
         # Step 4: Create Excel files with image_r2_path column
         print("\n[4/4] Creating and uploading Excel files...")
@@ -174,7 +161,7 @@ class MainS3Scraper:
         print("="*80)
         print(f"Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Categories processed: {len(excel_files)}")
-        print(f"Images uploaded to R2: {total_images}")
+        print(f"Images uploaded to R2: {total_images} (image upload disabled)")
         print(f"Excel files uploaded to R2: {len(upload_results)}")
         print("="*80)
 
