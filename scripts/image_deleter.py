@@ -145,6 +145,10 @@ def extract_referenced_image_keys(
     return referenced
 
 
+def _delete_one(client, bucket: str, key: str) -> None:
+    client.delete_object(Bucket=bucket, Key=key)
+
+
 def delete_objects_batch(
     client,
     bucket: str,
@@ -165,18 +169,49 @@ def delete_objects_batch(
             deleted += len(batch)
             continue
 
+        remaining = list(batch)
         try:
+            # Quiet=False is required: R2/S3 omit the Deleted list in quiet mode,
+            # which made this script report 0/N even when objects were removed.
             response = client.delete_objects(
                 Bucket=bucket,
-                Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
+                Delete={"Objects": [{"Key": key} for key in batch], "Quiet": False},
             )
-            deleted += len(response.get("Deleted", []))
-            failed += len(response.get("Errors", []))
-            for err in response.get("Errors", []):
-                print(f"  ERROR deleting {err.get('Key')}: {err.get('Message')}")
+            deleted_keys = {
+                item["Key"] for item in response.get("Deleted", []) if item.get("Key")
+            }
+            errors = response.get("Errors") or []
+            error_keys = {err.get("Key") for err in errors if err.get("Key")}
+            for err in errors:
+                print(
+                    f"  ERROR deleting {err.get('Key')}: "
+                    f"{err.get('Code')} {err.get('Message')}"
+                )
+            deleted += len(deleted_keys)
+            failed += len(errors)
+            remaining = [
+                key for key in batch if key not in deleted_keys and key not in error_keys
+            ]
+            if remaining:
+                print(
+                    f"  Batch API did not confirm {len(remaining)} object(s); "
+                    "retrying individually..."
+                )
         except ClientError as exc:
             print(f"  ERROR batch delete failed: {exc}")
-            failed += len(batch)
+            print("  Retrying this batch with individual deletes...")
+
+        for key in remaining:
+            try:
+                _delete_one(client, bucket, key)
+                deleted += 1
+            except ClientError as exc:
+                error = exc.response.get("Error", {})
+                print(
+                    f"  ERROR deleting {key}: "
+                    f"{error.get('Code', '')} {error.get('Message', exc)}"
+                )
+                failed += 1
 
     return {"requested": len(keys), "deleted": deleted, "failed": failed}
 
@@ -211,6 +246,13 @@ class ImageDeleter:
                 print(f"  ... and {len(keys) - 5} more")
 
         result = delete_objects_batch(self.client, self.bucket, keys, dry_run=dry_run)
+        if not dry_run:
+            remaining = self.list_images(dataset, partition)
+            result["remaining"] = len(remaining)
+            result["deleted"] = max(0, result["requested"] - len(remaining))
+            if remaining:
+                result["failed"] = len(remaining)
+                print(f"  WARNING: {len(remaining)} image(s) still present after delete")
         action = "Would delete" if dry_run else "Deleted"
         print(f"  {action}: {result['deleted']}/{result['requested']}")
         return result
