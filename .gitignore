@@ -21,3 +21,4 @@ monitor/__pycache__/github_workflows.cpython-311.pyc
 monitor/__pycache__/r2_file_counter.cpython-311.pyc
 doc/*
 
+scripts/__pycache__/storage_client.cpython-311.pyc
