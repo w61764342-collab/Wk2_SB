@@ -3,6 +3,9 @@
 Delete Boshamlan images already stored in AWS S3 or Cloudflare R2.
 
 Examples:
+  # Delete ALL Boshamlan images (properties + offices)
+  python scripts/delete_images.py --storage aws --mode all --execute --confirm-all
+
   # Preview images for one date (dry run is default)
   python scripts/delete_images.py --storage aws --mode list --date 2026-01-15
 
@@ -14,9 +17,6 @@ Examples:
 
   # Delete images older than 90 days
   python scripts/delete_images.py --storage aws --mode older-than --days 90 --execute
-
-  # Delete ALL Boshamlan images (properties + offices)
-  python scripts/delete_images.py --storage aws --mode all --execute --confirm-all
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        choices=["list", "partition", "orphans", "older-than", "all"],
-        default="list",
-        help="Deletion mode (default: list = preview only)",
+        choices=["all", "list", "partition", "orphans", "older-than"],
+        default="all",
+        help="Deletion mode (default: all images)",
     )
     parser.add_argument(
         "--dataset",

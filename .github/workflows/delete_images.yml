@@ -1,7 +1,7 @@
 name: Delete Boshamlan Images
 
 on:
-  # Weekly cleanup: remove images older than 90 days (dry run first in manual use)
+  # Weekly cleanup: remove all stored Boshamlan images
   schedule:
     - cron: '0 3 * * 0'
 
@@ -20,12 +20,12 @@ on:
         required: true
         type: choice
         options:
+          - all
           - list
           - partition
           - orphans
           - older-than
-          - all
-        default: older-than
+        default: all
       dataset:
         description: 'Dataset to target'
         required: true
@@ -49,12 +49,12 @@ on:
         description: 'Actually delete objects (unchecked = dry run)'
         required: false
         type: boolean
-        default: false
+        default: true
       confirm_all:
         description: 'Required when mode=all and execute=true'
         required: false
         type: boolean
-        default: false
+        default: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -86,16 +86,18 @@ jobs:
         id: cmd
         run: |
           STORAGE="${{ github.event.inputs.storage || 'aws' }}"
-          MODE="${{ github.event.inputs.mode || 'older-than' }}"
+          MODE="${{ github.event.inputs.mode || 'all' }}"
           DATASET="${{ github.event.inputs.dataset || 'both' }}"
           DAYS="${{ github.event.inputs.days || '90' }}"
           EXECUTE="${{ github.event.inputs.execute || 'false' }}"
           CONFIRM_ALL="${{ github.event.inputs.confirm_all || 'false' }}"
           DATE="${{ github.event.inputs.date }}"
 
-          # Scheduled runs: auto-delete images older than retention window.
+          # Scheduled runs: delete every stored image.
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            MODE="all"
             EXECUTE="true"
+            CONFIRM_ALL="true"
           fi
 
           CMD="python scripts/delete_images.py --storage $STORAGE --mode $MODE --dataset $DATASET --days $DAYS"
