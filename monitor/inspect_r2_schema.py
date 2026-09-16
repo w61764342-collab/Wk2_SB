@@ -84,6 +84,17 @@ ADAPTIVE_MIN_RUNS = 3
 ROW_COUNT_MARGIN_ABS = 5
 ROW_COUNT_MARGIN_RATIO = 0.25
 DEFAULT_MIN_ROWS_FOR_QUALITY = 5
+# Images are deleted after scrape; Excel may omit these columns.
+SKIPPED_COLUMNS = frozenset(
+    {
+        "image_r2_path",
+        "image_s3_path",
+        "S3 Image Path",
+        "s3_image_url",
+        "R2 Image Path",
+        "r2_image_url",
+    }
+)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -281,7 +292,11 @@ def validate_file(
 
     for sheet_schema in schema_entry.get("sheets", []):
         sheet_name = sheet_schema["name"]
-        required_cols = sheet_schema.get("required_columns", [])
+        required_cols = [
+            c
+            for c in sheet_schema.get("required_columns", [])
+            if c not in SKIPPED_COLUMNS
+        ]
         row_range, range_source = resolve_row_count_range(
             sheet_schema, scraper_name, sheet_name, persisted_stats
         )
@@ -309,7 +324,11 @@ def validate_file(
         # completely empty (e.g. offices with zero listings from yesterday).
         row_count = max(0, (ws.max_row or 1) - 1)
 
-        optional_cols = sheet_schema.get("optional_columns", [])
+        optional_cols = [
+            c
+            for c in sheet_schema.get("optional_columns", [])
+            if c not in SKIPPED_COLUMNS
+        ]
         cols_to_check = list(required_cols)
         if row_count > 0:
             cols_to_check.extend(optional_cols)
