@@ -1,14 +1,8 @@
 name: Daily Pipeline (Cloudflare R2)
 
 on:
-  # Run every day at 12:00 AM UTC
-  schedule:
-    - cron: '0 0 * * *'
-
-  # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
 
-  # Allow being called from another workflow
   workflow_call:
     outputs:
       properties_status:
