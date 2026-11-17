@@ -185,10 +185,10 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add status_r2.json
-          git commit -m "Update status_r2.json - ${{ steps.status.outputs.overall_status }} ($(date -u +"%Y-%m-%d %H:%M UTC"))" || echo "No changes to commit"
           git pull --rebase origin main
-          git push
+          git add status_r2.json
+          git commit -m "Update status_r2.json for run ${{ github.run_number }}" || echo "No changes to commit"
+          git push origin HEAD:main
 
       - name: Upload status as artifact
         uses: actions/upload-artifact@v4
